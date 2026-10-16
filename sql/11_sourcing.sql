@@ -37,6 +37,8 @@ CREATE TABLE sourcing_request (
     created_by                 bigint        NOT NULL DEFAULT app_current_user_id() REFERENCES user_account (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     updated_at                 timestamptz   NOT NULL DEFAULT now(),
     updated_by                 bigint        NOT NULL DEFAULT app_current_user_id() REFERENCES user_account (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    -- target of outreach_batch's composite FK: outreach under a request is for the request's requirement
+    CONSTRAINT uq_sourcing_request_id_job_requirement_id UNIQUE (id, job_requirement_id),
     CONSTRAINT ck_sourcing_request_proposed_fee_pct CHECK (proposed_fee_pct > 0 AND proposed_fee_pct <= 100),
     CONSTRAINT ck_sourcing_request_date_range CHECK (decided_at >= requested_at),
     CONSTRAINT ck_sourcing_request_decision CHECK ((decided_at IS NULL) = (decided_by_user_account_id IS NULL))
@@ -55,7 +57,7 @@ CREATE TABLE outreach_batch (
     sender_user_account_id   bigint       NOT NULL REFERENCES user_account (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     organisation_id          bigint REFERENCES organisation (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     job_requirement_id       bigint REFERENCES job_requirement (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
-    sourcing_request_id      bigint REFERENCES sourcing_request (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    sourcing_request_id      bigint,
     outreach_channel_id      bigint       NOT NULL REFERENCES outreach_channel (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     message_template_ref     varchar(100) NOT NULL,
     outreach_batch_status_id bigint       NOT NULL DEFAULT 1 REFERENCES outreach_batch_status (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
@@ -64,10 +66,16 @@ CREATE TABLE outreach_batch (
     created_at               timestamptz  NOT NULL DEFAULT now(),
     created_by               bigint       NOT NULL DEFAULT app_current_user_id() REFERENCES user_account (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     updated_at               timestamptz  NOT NULL DEFAULT now(),
-    updated_by               bigint       NOT NULL DEFAULT app_current_user_id() REFERENCES user_account (id) ON UPDATE RESTRICT ON DELETE RESTRICT
+    updated_by               bigint       NOT NULL DEFAULT app_current_user_id() REFERENCES user_account (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_outreach_batch_sourcing_request FOREIGN KEY (sourcing_request_id, job_requirement_id)
+        REFERENCES sourcing_request (id, job_requirement_id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT ck_outreach_batch_sourcing_request CHECK (sourcing_request_id IS NULL OR job_requirement_id IS NOT NULL)
 );
+-- A batch is charged once (1 : 0..1 to the ledger entry).
+CREATE UNIQUE INDEX uq_outreach_batch_wallet_ledger_entry_id ON outreach_batch (wallet_ledger_entry_id) WHERE wallet_ledger_entry_id IS NOT NULL;
 CREATE INDEX idx_outreach_batch_sender_user_account_id ON outreach_batch (sender_user_account_id, created_at DESC);
 CREATE INDEX idx_outreach_batch_job_requirement_id ON outreach_batch (job_requirement_id) WHERE job_requirement_id IS NOT NULL;
+CREATE INDEX idx_outreach_batch_sourcing_request_id ON outreach_batch (sourcing_request_id) WHERE sourcing_request_id IS NOT NULL;
 
 CREATE TABLE outreach_recipient (
     id                           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

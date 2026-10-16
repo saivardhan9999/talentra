@@ -20,7 +20,7 @@ A milestone is verified when its script passes **and** a reviewer ticks its chec
    ```sh
    MSYS_NO_PATHCONV=1 ./run_phase1.sh
    ```
-   **Expected:** the last line is `VERIFIED: m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11` and `echo $?` prints `0`. Any `ERROR` / `FAIL` line stops the run with a non-zero exit code.
+   **Expected:** the last line is `VERIFIED: m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11 m12 m13` and `echo $?` prints `0`. Any `ERROR` / `FAIL` line stops the run with a non-zero exit code.
 
 > `MSYS_NO_PATHCONV=1` is only needed in Git Bash on Windows. It stops `/sql/...` being rewritten to a Windows path.
 > `./run_phase1.sh m3` rebuilds the database and verifies one milestone. `./run_phase1.sh --no-build m3` verifies against the existing database.
@@ -77,7 +77,7 @@ MSYS_NO_PATHCONV=1 ./run_phase1.sh m3
 Expected:
 ```
 PASS 33 documented relationships exist with the stated cardinality and ON DELETE rule
-PASS all 702 foreign keys state explicit ON UPDATE and ON DELETE rules
+PASS all 703 foreign keys state explicit ON UPDATE and ON DELETE rules
 ```
 followed by a summary of FKs per delete rule (`r` restrict, `c` cascade, `n` set null).
 
@@ -176,19 +176,21 @@ Every test runs inside a transaction that is rolled back, so the database is unc
 
 | Milestone | Command | Pass signal |
 |---|---|---|
-| All | `./run_phase1.sh` | `VERIFIED: m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11`, exit 0 |
+| All | `./run_phase1.sh` | `VERIFIED: m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11 m12 m13`, exit 0 |
 | M1 Provider | `./run_phase1.sh m1` | 3 PASS |
 | M2 Entities | `./run_phase1.sh m2` | 7 PASS, no orphan tables |
-| M3 Relationships | `./run_phase1.sh m3` | 33 relationships, 702 FKs explicit |
+| M3 Relationships | `./run_phase1.sh m3` | 33 relationships, 703 FKs explicit |
 | M4 Columns | `./run_phase1.sh m4` | 10 PASS |
 | M5 Design | `./run_phase1.sh m5` | 12 PASS, `MILESTONE 5 CHECKS PASSED` |
 | M6 Constraints | `./run_phase1.sh m6` | 45 PASS, `MILESTONE 6 CHECKS PASSED` |
-
-If a check fails: the line before the error names the table, column or rule. Fix the DDL in `sql/0x_*.sql`, then re-run that milestone. A plain `./run_phase1.sh mN` always rebuilds from scratch.
 | M7 Entities (Phase 2) | `./run_phase1.sh m7` | 5 PASS — see [phase2-design.md](phase2-design.md#verification) |
-| M8 Relationships (Phase 2) | `./run_phase1.sh m8` | 33 relationships, 702 FKs explicit |
+| M8 Relationships (Phase 2) | `./run_phase1.sh m8` | 33 relationships, 703 FKs explicit |
 | M9 Columns (Phase 2) | `./run_phase1.sh m9` | 7 PASS |
 | M10 Constraints (Phase 2) | `./run_phase1.sh m10` | 60 PASS, `MILESTONE 10 CHECKS PASSED` |
 | M11 Entities (Phase 3) | `./run_phase1.sh m11` | 6 PASS — see [phase3-design.md](phase3-design.md#verification) |
+| M12 Relationships (Phase 3) | `./run_phase1.sh m12` | 40 relationships, 703 FKs explicit, 3 composite-FK rejections |
+| M13 Columns (Phase 3) | `./run_phase1.sh m13` | 11 PASS |
+
+If a check fails: the line before the error names the table, column or rule. Fix the DDL in `sql/0x_*.sql`, then re-run that milestone. A plain `./run_phase1.sh mN` always rebuilds from scratch.
 
 > Counts above reflect the full build (Phases 1–3). The runner builds every `sql/NN_*.sql` and runs every `sql/tests/mN_*.sql`.

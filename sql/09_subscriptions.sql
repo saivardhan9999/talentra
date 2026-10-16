@@ -78,6 +78,7 @@ CREATE TABLE payment_order (
     payment_purpose_id        bigint        NOT NULL REFERENCES payment_purpose (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     order_amount              numeric(14,2) NOT NULL,
     order_currency_id         bigint        NOT NULL REFERENCES currency (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    credit_quantity           integer,
     payment_order_status_id   bigint        NOT NULL DEFAULT 1 REFERENCES payment_order_status (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     gateway_order_ref         varchar(100),
     paid_at                   timestamptz,
@@ -86,7 +87,10 @@ CREATE TABLE payment_order (
     updated_at                timestamptz   NOT NULL DEFAULT now(),
     updated_by                bigint        NOT NULL DEFAULT app_current_user_id() REFERENCES user_account (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     CONSTRAINT uq_payment_order_gateway_order_ref UNIQUE (gateway_order_ref),
-    CONSTRAINT ck_payment_order_order_amount CHECK (order_amount > 0)
+    CONSTRAINT ck_payment_order_order_amount CHECK (order_amount > 0),
+    -- a wallet recharge (purpose 2) states the credits it buys; a subscription order buys none
+    CONSTRAINT ck_payment_order_credit_quantity CHECK (credit_quantity > 0 AND payment_purpose_id = 2
+                                                       OR credit_quantity IS NULL AND payment_purpose_id <> 2)
 );
 CREATE INDEX idx_payment_order_organisation_id ON payment_order (organisation_id, created_at DESC);
 
@@ -163,6 +167,8 @@ CREATE TABLE subscription (
     created_by             bigint       NOT NULL DEFAULT app_current_user_id() REFERENCES user_account (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     updated_at             timestamptz  NOT NULL DEFAULT now(),
     updated_by             bigint       NOT NULL DEFAULT app_current_user_id() REFERENCES user_account (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    -- target of licence's composite FK: a licence belongs to the subscribing organisation
+    CONSTRAINT uq_subscription_id_organisation_id UNIQUE (id, organisation_id),
     CONSTRAINT ck_subscription_date_range CHECK (cancelled_at >= started_at),
     CONSTRAINT ck_subscription_cancellation CHECK (cancellation_reason IS NULL OR cancelled_at IS NOT NULL)
 );
@@ -183,7 +189,8 @@ CREATE TABLE subscription_period (
     CONSTRAINT ck_subscription_period_renewal_number CHECK (renewal_number >= 0),
     CONSTRAINT ck_subscription_period_date_range CHECK (period_end_at > period_start_at)
 );
-CREATE INDEX idx_subscription_period_payment_order_id ON subscription_period (payment_order_id) WHERE payment_order_id IS NOT NULL;
+-- An order pays for at most one period (1 : 0..1).
+CREATE UNIQUE INDEX uq_subscription_period_payment_order_id ON subscription_period (payment_order_id) WHERE payment_order_id IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
 -- Wallet (credits) and its append-only ledger. One wallet per account; balance is
@@ -219,6 +226,9 @@ CREATE TABLE wallet_ledger_entry (
     CONSTRAINT ck_wallet_ledger_entry_balance_after CHECK (balance_after >= 0)
 );
 CREATE INDEX idx_wallet_ledger_entry_wallet_id ON wallet_ledger_entry (wallet_id, occurred_at);
+-- A recharge order credits the wallet once; a refund debits it once (1 : 0..1 each).
+CREATE UNIQUE INDEX uq_wallet_ledger_entry_payment_order_id ON wallet_ledger_entry (payment_order_id) WHERE payment_order_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_wallet_ledger_entry_refund_id ON wallet_ledger_entry (refund_id) WHERE refund_id IS NOT NULL;
 CREATE UNIQUE INDEX uq_wallet_ledger_entry_reverses ON wallet_ledger_entry (reverses_wallet_ledger_entry_id) WHERE reverses_wallet_ledger_entry_id IS NOT NULL;
 CALL make_append_only('wallet_ledger_entry');
 
@@ -255,6 +265,7 @@ COMMENT ON COLUMN plan.max_users                       IS 'class=Public; users a
 COMMENT ON COLUMN plan.max_devices_per_user            IS 'class=Public; devices allowed per user (> 0)';
 COMMENT ON COLUMN plan_entitlement.quantity_per_period IS 'class=Public; null=unlimited within the period';
 COMMENT ON COLUMN payment_order.order_amount           IS 'class=Internal';
+COMMENT ON COLUMN payment_order.credit_quantity        IS 'class=Internal; credits bought (price fixed at order time); null=subscription order';
 COMMENT ON COLUMN payment_order.gateway_order_ref      IS 'class=Internal; idempotency key at the gateway; null=order not yet sent to the gateway';
 COMMENT ON COLUMN payment_order.paid_at                IS 'class=Internal; null=not paid';
 COMMENT ON COLUMN payment_event.gateway_event_ref      IS 'class=Internal; webhook id, idempotency key';
