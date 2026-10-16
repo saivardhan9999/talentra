@@ -251,6 +251,63 @@ CREATE INDEX idx_referral_event_referral_id ON referral_event (referral_id, occu
 CALL make_append_only('referral_event');
 
 -- -----------------------------------------------------------------------------
+-- M18 (B57) the high-volume write path for deliveries.
+-- 1. One insert per channel attempt at enqueue. The recipient's preference is applied
+--    on the way in: a channel switched off is stored as suppressed, never sent, and the
+--    decision stays visible.
+-- 2. Provider callbacks only move status forward (queued < sent < delivered < read;
+--    failed only before delivery). A replayed or late callback is a no-op, so callbacks
+--    are idempotent without a lookup table; the first reported time of each step wins.
+-- 3. Status columns are not indexed and partitions keep 30% free space, so callback
+--    updates are HOT updates (no index writes). Monthly partitions are dropped whole
+--    when retention ends (no row-by-row DELETE).
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION trg_notification_delivery_rules() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE v_old bigint; v_new bigint;
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.notification_delivery_status_id <> 1 THEN RAISE EXCEPTION 'a delivery starts as queued'; END IF;
+        IF EXISTS (SELECT 1 FROM notification n JOIN notification_preference p
+                     ON p.user_account_id = n.recipient_user_account_id AND p.notification_type_id = n.notification_type_id
+                   WHERE n.id = NEW.notification_id AND p.outreach_channel_id = NEW.outreach_channel_id AND NOT p.is_enabled) THEN
+            NEW.notification_delivery_status_id := 6;
+        END IF;
+        RETURN NEW;
+    END IF;
+    IF NEW.notification_id <> OLD.notification_id OR NEW.outreach_channel_id <> OLD.outreach_channel_id OR NEW.queued_at <> OLD.queued_at THEN
+        RAISE EXCEPTION 'delivery %: only status and provider fields change', OLD.id;
+    END IF;
+    v_old := OLD.notification_delivery_status_id;
+    v_new := NEW.notification_delivery_status_id;
+    IF v_old IN (4, 5, 6)                 -- read, failed and suppressed are final
+       OR v_new = 6                       -- suppression is decided at enqueue only
+       OR (v_new = 5 AND v_old > 2)       -- a delivered message cannot fail afterwards
+       OR (v_new < 5 AND v_new <= v_old)  -- replay or out-of-order callback
+    THEN
+        NEW.notification_delivery_status_id := v_old;
+    END IF;
+    v_new := NEW.notification_delivery_status_id;
+    NEW.sent_at      := CASE WHEN v_new BETWEEN 2 AND 4 THEN coalesce(OLD.sent_at, NEW.sent_at, now()) ELSE OLD.sent_at END;
+    NEW.delivered_at := CASE WHEN v_new IN (3, 4) THEN coalesce(OLD.delivered_at, NEW.delivered_at, now()) ELSE OLD.delivered_at END;
+    NEW.failed_at    := CASE WHEN v_new = 5 THEN coalesce(OLD.failed_at, NEW.failed_at, now()) ELSE OLD.failed_at END;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_notification_delivery_rules BEFORE INSERT OR UPDATE ON notification_delivery
+    FOR EACH ROW EXECUTE FUNCTION trg_notification_delivery_rules();
+
+-- Free space for HOT updates on every partition; create_monthly_partitions copies the
+-- default partition's storage options to partitions it adds later (13_shared.sql).
+DO $$
+DECLARE r record;
+BEGIN
+    FOR r IN SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid
+             WHERE i.inhparent = 'notification_delivery'::regclass LOOP
+        EXECUTE format('ALTER TABLE %I SET (fillfactor = 70)', r.relname);
+    END LOOP;
+END $$;
+
+-- -----------------------------------------------------------------------------
 -- Classification and nullability justification (rule groups 5, 6)
 -- -----------------------------------------------------------------------------
 COMMENT ON COLUMN user_preference.timezone_name              IS 'class=Personal; IANA zone name, used for alert and digest times';

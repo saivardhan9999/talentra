@@ -1,16 +1,17 @@
 # Talentra — Phase 4 Design (Notifications, Analytics and shared team items)
 
-**Scope so far:** Milestones 15–16, backlogs B48–B53. Modules: **Notifications, preferences and community**, **Analytics layer and reporting marts**, **Shared team items** (all team-owned).
-**Status:** M15–M16 built and verified on PostgreSQL 16 (`./run_phase1.sh m15`, `m16`). M17 (columns) and M18 (keys and constraints: high-volume delivery write path, slowly changing dimension keys and aggregate refresh, append-only audit trail, unique credentials, blocked party cannot see the blocker's candidate) are next.
+**Scope:** Milestones 15–18, backlogs B48–B59 (Phase 4 complete; the schema is complete). Modules: **Notifications, preferences and community**, **Analytics layer and reporting marts**, **Shared team items** (all team-owned).
+**Status:** M15–M18 built and verified on PostgreSQL 16 (`./run_phase1.sh m15` … `m18`).
 
 | File | Contents |
 |---|---|
 | `sql/12_notifications.sql` | Preferences (language, privacy, notification, job alerts), notifications and deliveries, community posts and reactions, support tickets, FAQs, referral events |
 | `sql/13_shared.sql` | Credentials, consent records, blocking lists, system error log |
 | `sql/14_analytics.sql` | Star schema: 5 dimensions, 11 facts, 4 aggregates |
-| `sql/tests/m15_entities.sql`, `m16_relationships.sql` | Milestone checks |
+| `sql/tests/m15_entities.sql` … `m18_constraints.sql` | Milestone checks (m17 shares `check_columns.sql` with m9 and m13) |
+| `docs/phase4-data-dictionary.md` | Generated column list |
 
-As in Phases 2–3, tables are created with their columns, foreign keys and structural CHECKs, so the schema-wide column rules (m4, m9/m13) keep passing. The behavioural rules come in M18.
+As in Phases 2–3, tables are created with their columns, foreign keys and structural CHECKs, so the schema-wide column rules (m4, m9/m13) keep passing. The M18 rules are triggers, constraints and row-level security policies in the same files.
 
 ---
 
@@ -182,11 +183,107 @@ Aggregates and the facts they read (materialised-view dependencies, asserted by 
 
 ---
 
+## Milestone 17 — Columns (B54–B56)
+
+Full column list with type, nullability, class, FK and null justification: **[`docs/phase4-data-dictionary.md`](phase4-data-dictionary.md)** (32 tables, generated from the catalog).
+
+The same column rules as Phases 2 and 3 run for Phase 4 through the shared `check_columns.sql`. Every data column states its class (374 columns checked), every date range has a CHECK, and the email, phone, money and free-text domains are checked schema-wide. Phase 4 adds:
+
+| Rule | Implementation (checked in `m17_columns.sql`) |
+|---|---|
+| **Credentials are Sensitive** (B56) | `user_credential.password_hash` (argon2id encoded string: algorithm, cost, salt and hash, never the password) and `provider_subject_hmac` (HMAC-SHA256 of the social provider's subject id) are `class=Sensitive`. Schema-wide, no column that looks like a secret (`password`, `secret`, `otp`, `pin_code`, `api_key`) exists except as `_hash` / `_hmac` |
+| Analytical layer holds no personal data (D19) | No `dim_` / `fact_` / `agg_` column is Personal or Sensitive, and none is named like an identifier (email, phone, name, address, birth) |
+| Consent evidence | `consent_record` states purpose, policy version, grant or withdrawal and time (all NOT NULL); IP and user agent as Personal evidence |
+| Messaging boundary | `notification.summary` is `varchar(300)`: enough for the in-app list and audit, never a message body |
+| Multilingual user text (rule group 7) | `community_post.body_language_id` records the language where known; FAQ text is UI label keys |
+| Date ranges | Detection extended to `unblocked_at`, `resolved_at`, `closed_at`, `read_at` |
+
+**Sensitive data in Phase 4:** the two credential columns. **Personal data:** time zone, job-alert criteria (city, salary floor), notification summaries, support ticket subjects and messages, block entries (who blocks whom is itself personal), consent evidence (IP, user agent).
+
+---
+
+## Milestone 18 — Keys and constraints (B57–B59)
+
+### B57 Notifications: the high-volume write path for deliveries
+
+| Rule | Mechanism |
+|---|---|
+| Insert once, update rarely | One `notification_delivery` row per channel attempt, written at enqueue; provider callbacks update status in place |
+| Preferences honoured on the write path | `trg_notification_delivery_rules`: a channel the recipient switched off for that type is stored as `suppressed` at enqueue (never sent, decision visible). Uses the unique `(user, type, channel)` preference index |
+| **Idempotent callbacks without a lookup table** | Status only moves forward: queued < sent < delivered < read, failed only before delivery, and read / failed / suppressed are final. A replayed or late callback is a no-op, and the first reported time of each step wins. Deliveries start as `queued` |
+| Cheap updates at volume | Callback-updated columns are not indexed and every partition has `fillfactor = 70`, so callback updates are HOT updates (no index writes). `create_monthly_partitions` copies the storage options to partitions added later |
+| Cheap retention | Monthly partitions by `queued_at`; expired months are dropped whole, never deleted row by row |
+
+### B58 Analytics: slowly changing dimension keys and aggregate refresh rules
+
+| Rule | Mechanism |
+|---|---|
+| SCD 2 versions never overlap | `uq_dim_organisation_no_overlap` / `uq_dim_candidate_no_overlap`: `EXCLUDE USING gist (source id =, tstzrange(valid_from, valid_to) &&)` |
+| Exactly the open version is current | `CHECK (is_current = (valid_to IS NULL))` + partial unique current version per source id (also the load-time lookup path) |
+| Facts attach the version valid at the event | `dim_organisation_version(id, at)` / `dim_candidate_version(id, at)` |
+| Type 2 load step | `dim_organisation_apply(...)`: a change of a tracked attribute (type, industry, size band, verification, HQ) closes the current version at `p_at` and opens a new one; the display name is type 1 (corrected in place) |
+| SCD 1 dimensions | One row per source id: unique `city_id`, `job_requirement_id` |
+| **Aggregate refresh rule** | After every fact load the job calls `refresh_aggregates()`: every `agg_` view is refreshed `CONCURRENTLY` (readers keep the previous contents; uses the unique index each aggregate has), and each refresh is written to the append-only `agg_refresh_log`. Dashboards show the last `finished_at` as "data as of" |
+
+### B59 Shared items
+
+| Rule | Mechanism |
+|---|---|
+| **Append-only audit trail, for every role and every partition** | `audit_event` was already append-only through a trigger and revoked privileges (M10). M18 closes a gap: a `TRUNCATE` trigger on a partitioned table does not fire for a `TRUNCATE` of one partition. `protect_partitions()` now gives every partition of every append-only table its own trigger, and `make_append_only` / `create_monthly_partitions` apply it to partitions created later. The same applies to the Phase 1 history tables, login attempts, downloads and the error log |
+| Consent is history | `consent_record` append-only: a withdrawal is a new row |
+| **Unique constraint on credentials** | One live credential per user and type (`uq_user_credential_user_account_id_credential_type_id`); one social identity linked to one user (`uq_user_credential_credential_type_id_provider_subject_hmac`) |
+| A password is never stored in clear | CHECK: `password_hash` must be an argon2id encoded string; the subject HMAC must be 32 bytes |
+| No in-place secret edits | Trigger: rotation is revoke + new row; a revoked credential stays revoked |
+| Blocks belong to the blocker | `CHECK (blocker = created_by)`; one live block per blocker and target; an unblock is final (blocking again is a new entry) |
+| **A blocked party cannot see the blocker's candidate** (docket §3) | Row-level security for `talentra_app` on `candidate_profile` and its content tables (email, phone, address, social links, education, work, skills, languages, certifications, preferences, resumes and resume versions). `app_can_see_candidate()` lets through the owner, platform admins, and otherwise only non-hidden profiles, with employers-only profiles limited to organisation members and consultants. It always excludes a user the candidate blocked and every current member of an organisation the candidate blocked. `block_entry` is readable only by the blocker, so the block itself stays private |
+| **Row-level security applies through views** | Every `v_` view is now `security_invoker`. Before M18 the views ran with their owner's rights: a recruiter could read another company's draft requirements through `v_job_requirement`. That was a Phase 2 hole, found while designing the candidate rule. m18 asserts `security_invoker` for every view, so a new view cannot reopen it |
+
+**Scope note — existing applications.** A candidate who blocks an employer they have already applied to stays in that employer's application pipeline (the candidate applied; the employer must be able to close the application). The profile, contact details and resumes are hidden. Withdrawing the application is the candidate's way out.
+
+### Validation evidence (B57–B59)
+`m18_constraints.sql` runs 48 checks in one rolled-back transaction; the visibility part runs as `talentra_app`. Mutation-tested, one at a time, with each breakage making the matching check fail:
+- removing the Sensitive class from `password_hash` (m17);
+- disabling RLS on `candidate_profile`;
+- turning `security_invoker` off on `v_job_requirement`;
+- dropping one audit partition's `TRUNCATE` trigger;
+- dropping the delivery trigger.
+
+### Deviation register (Phase 4)
+
+| Rule | Deviation | Reason | Risk / mitigation |
+|---|---|---|---|
+| 2 — surrogate key | `dim_date.id` is the yyyymmdd smart key | Standard for date dimensions; readable partition and filter keys | CHECK ties it to `calendar_date` |
+| 2 — FK for every relationship | Facts keep source ids as degenerate keys without FKs (D19) | Marts can load from a replica; erasure never blocks reporting | Load job validates them (M20) |
+| 3 — no free-text enumerations | Dimensions hold lookup **codes** copied at load | Reports need no join back to the transactional side | Codes come from lookups, not user input |
+| 2 — unique constraints | No unique "one delivery per notification and channel": retries are new rows | Each attempt has its own provider status | Status trigger keeps each row consistent |
+| 2 — CHECK with lookup values | Delivery, credential and ticket rules use SYSTEM lookup ids (marked `SYSTEM:` in the lookup comment) | A CHECK cannot look up a code | Ids < 1000 reserved; system codes immutable |
+| 1 — PK named `id` | `notification_delivery`, `system_error_event` PK `(id, time)` | Partition key must be in the PK | Same as earlier history tables |
+| Performance | Candidate visibility is a function call per row | Correctness first; one place to change | `ponytail:` comment; measured in M21 at 1M profiles |
+
+### Rule compliance (Phase 4 scope)
+
+| Rule group | Complies | Notes |
+|---|---|---|
+| 1 Naming | Yes | Automated (m4) |
+| 2 Keys and constraints | Yes, with deviations above | Exclusion constraints for SCD 2, partial uniques for credentials and blocks |
+| 3 Standard domains | Yes | Automated (m17) |
+| 4 Audit and lifecycle | Yes | Audit trail append-only per partition; consent, ticket messages, referral events, error log, refresh log append-only; credentials and blocks audited |
+| 5 Nullability | Yes | Automated (m4) |
+| 6 Classification | Yes | Credentials Sensitive as hashes; no personal data in the marts |
+| 7 Multilingual | Yes | FAQ by label key; community text records its language |
+| 8 Physical naming | Yes | `dim_` / `fact_` / `agg_` prefixes (m15), `<table>_pYYYYMM` partitions, `v_` views |
+| 9 Licensing | N/A | Phase 3 |
+| 10 Money / history | Yes | Marts mirror the append-only ledger (`fact_wallet_transaction` append-only) |
+
+---
+
 ## Verification
 
 ```sh
 MSYS_NO_PATHCONV=1 ./run_phase1.sh m15
 MSYS_NO_PATHCONV=1 ./run_phase1.sh m16
+MSYS_NO_PATHCONV=1 ./run_phase1.sh m17
+MSYS_NO_PATHCONV=1 ./run_phase1.sh m18
 ```
 
 m15 expected output:
@@ -206,3 +303,5 @@ Mutation-tested:
 - [ ] Missing Section 8 raised with the organisers; derived KPI set accepted.
 - [ ] D19 (marts in the same database, degenerate keys), D20 (one preference row; shared channel list), D21 (reuse of sessions and audit trail), D22 (only deliveries partitioned) agreed.
 - [ ] `block_entry` vs the gig worker blacklist split accepted.
+- [ ] Existing-application scope note for blocks accepted.
+- [ ] Phase 4 deviation register accepted.

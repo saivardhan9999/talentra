@@ -98,6 +98,196 @@ CALL create_monthly_partitions('system_error_event', DATE '2025-01-01', DATE '20
 CALL make_append_only('system_error_event');
 
 -- -----------------------------------------------------------------------------
+-- M18 (B59) the append-only audit trail, for every role and every partition.
+-- A statement-level TRUNCATE trigger on a partitioned table does not fire for a
+-- TRUNCATE of one partition, so each partition gets its own. Partitions added later
+-- by create_monthly_partitions inherit the protection and the storage options.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE protect_partitions(p_table text)
+LANGUAGE plpgsql AS $$
+DECLARE r record;
+BEGIN
+    FOR r IN SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid WHERE i.inhparent = p_table::regclass LOOP
+        EXECUTE format('CREATE OR REPLACE TRIGGER %I BEFORE TRUNCATE ON %I FOR EACH STATEMENT EXECUTE FUNCTION trg_forbid_modification()',
+                       'trg_' || r.relname || '_no_truncate', r.relname);
+    END LOOP;
+END $$;
+
+CREATE OR REPLACE PROCEDURE make_append_only(p_table text)
+LANGUAGE plpgsql AS $$
+BEGIN
+    EXECUTE format('CREATE TRIGGER %I BEFORE UPDATE OR DELETE ON %I FOR EACH ROW EXECUTE FUNCTION trg_forbid_modification()',
+                   'trg_' || p_table || '_append_only', p_table);
+    EXECUTE format('CREATE TRIGGER %I BEFORE TRUNCATE ON %I FOR EACH STATEMENT EXECUTE FUNCTION trg_forbid_modification()',
+                   'trg_' || p_table || '_no_truncate', p_table);
+    CALL revoke_append_only(p_table);
+    IF (SELECT relkind FROM pg_class WHERE oid = p_table::regclass) = 'p' THEN CALL protect_partitions(p_table); END IF;
+END $$;
+
+CREATE OR REPLACE PROCEDURE create_monthly_partitions(p_table text, p_from date, p_to date)
+LANGUAGE plpgsql AS $$
+DECLARE d date := date_trunc('month', p_from); v_opts text[]; r record;
+BEGIN
+    WHILE d < p_to LOOP
+        EXECUTE format('CREATE TABLE IF NOT EXISTS %I PARTITION OF %I FOR VALUES FROM (%L) TO (%L)',
+                       p_table || '_p' || to_char(d, 'YYYYMM'), p_table, d, (d + interval '1 month')::date);
+        d := (d + interval '1 month')::date;
+    END LOOP;
+    IF to_regclass(p_table || '_pdefault') IS NULL THEN
+        EXECUTE format('CREATE TABLE %I PARTITION OF %I DEFAULT', p_table || '_pdefault', p_table);
+    END IF;
+    SELECT reloptions INTO v_opts FROM pg_class WHERE relname = p_table || '_pdefault';
+    IF v_opts IS NOT NULL THEN
+        FOR r IN SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid WHERE i.inhparent = p_table::regclass LOOP
+            EXECUTE format('ALTER TABLE %I SET (%s)', r.relname, array_to_string(v_opts, ', '));
+        END LOOP;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = p_table::regclass AND tgname = 'trg_' || p_table || '_no_truncate') THEN
+        CALL protect_partitions(p_table);
+    END IF;
+END $$;
+
+DO $$
+DECLARE r record;
+BEGIN
+    FOR r IN SELECT c.relname FROM pg_class c JOIN pg_trigger t ON t.tgrelid = c.oid AND t.tgname = 'trg_' || c.relname || '_no_truncate'
+             WHERE c.relkind = 'p' LOOP
+        CALL protect_partitions(r.relname);
+    END LOOP;
+END $$;
+
+-- -----------------------------------------------------------------------------
+-- M18 (B59) credentials: one live credential per user and type, a social identity
+-- linked to one user, a password only in argon2id form, and no in-place edits
+-- (rotation = revoke + new row, so the history stays).
+-- -----------------------------------------------------------------------------
+CREATE UNIQUE INDEX uq_user_credential_user_account_id_credential_type_id ON user_credential (user_account_id, credential_type_id)
+    WHERE revoked_at IS NULL;
+CREATE UNIQUE INDEX uq_user_credential_credential_type_id_provider_subject_hmac ON user_credential (credential_type_id, provider_subject_hmac)
+    WHERE revoked_at IS NULL AND provider_subject_hmac IS NOT NULL;
+ALTER TABLE user_credential
+    ADD CONSTRAINT ck_user_credential_password_hash_format
+        CHECK (password_hash ~ '^\$argon2id\$v=19\$m=[0-9]+,t=[0-9]+,p=[0-9]+\$[A-Za-z0-9+/]+\$[A-Za-z0-9+/]+$'),
+    ADD CONSTRAINT ck_user_credential_hmac_length CHECK (octet_length(provider_subject_hmac) = 32);
+
+CREATE OR REPLACE FUNCTION trg_user_credential_rules() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.user_account_id <> OLD.user_account_id OR NEW.credential_type_id <> OLD.credential_type_id
+       OR NEW.password_hash IS DISTINCT FROM OLD.password_hash OR NEW.provider_subject_hmac IS DISTINCT FROM OLD.provider_subject_hmac
+       OR (OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS DISTINCT FROM OLD.revoked_at) THEN
+        RAISE EXCEPTION 'credential %: a secret is never edited in place; revoke it and add a new credential', OLD.id;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_user_credential_rules BEFORE UPDATE ON user_credential FOR EACH ROW EXECUTE FUNCTION trg_user_credential_rules();
+
+-- -----------------------------------------------------------------------------
+-- M18 (B59) blocking. A user blocks for themselves, once per target at a time; an
+-- unblock is final (blocking again is a new entry).
+-- -----------------------------------------------------------------------------
+ALTER TABLE block_entry ADD CONSTRAINT ck_block_entry_self_blocked CHECK (blocker_user_account_id = created_by);
+CREATE UNIQUE INDEX uq_block_entry_blocker_blocked_user_live ON block_entry (blocker_user_account_id, blocked_user_account_id)
+    WHERE unblocked_at IS NULL AND blocked_user_account_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_block_entry_blocker_blocked_organisation_live ON block_entry (blocker_user_account_id, blocked_organisation_id)
+    WHERE unblocked_at IS NULL AND blocked_organisation_id IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION trg_block_entry_rules() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.blocker_user_account_id <> OLD.blocker_user_account_id
+       OR NEW.blocked_user_account_id IS DISTINCT FROM OLD.blocked_user_account_id
+       OR NEW.blocked_organisation_id IS DISTINCT FROM OLD.blocked_organisation_id
+       OR (OLD.unblocked_at IS NOT NULL AND NEW.unblocked_at IS DISTINCT FROM OLD.unblocked_at) THEN
+        RAISE EXCEPTION 'block %: only unblocking a live block is allowed', OLD.id;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_block_entry_rules BEFORE UPDATE ON block_entry FOR EACH ROW EXECUTE FUNCTION trg_block_entry_rules();
+
+-- -----------------------------------------------------------------------------
+-- M18 (B59, docket §3) a blocked party cannot see the blocker's candidate.
+-- Row-level security for talentra_app on the profile and on the profile content
+-- tables (contact details, education, work, skills, resumes). A candidate is visible
+-- to: themselves; platform admins; anyone else only if the profile is not hidden,
+-- "employers only" profiles only to organisation members and consultants, and never
+-- to a user the candidate blocked or to a member of an organisation they blocked.
+-- The blocked party cannot read block_entry either, so the block itself stays private.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app_can_see_candidate(p_candidate_profile_id bigint) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    WITH me AS (SELECT app_current_user_id() AS uid),
+    my_orgs AS (SELECT m.organisation_id FROM organisation_member m, me
+                WHERE m.user_account_id = me.uid AND m.valid_from <= now() AND (m.valid_to IS NULL OR m.valid_to > now()))
+    SELECT EXISTS (
+        SELECT 1 FROM candidate_profile c, me
+        WHERE c.id = p_candidate_profile_id AND c.deleted_at IS NULL
+          AND (c.user_account_id = me.uid
+               OR app_has_permission('platform.admin')
+               OR (c.profile_visibility_id <> 3
+                   AND (c.profile_visibility_id = 1
+                        OR EXISTS (SELECT 1 FROM my_orgs)
+                        OR EXISTS (SELECT 1 FROM user_account_role g WHERE g.user_account_id = me.uid AND g.role_id = 8 AND g.revoked_at IS NULL))
+                   AND NOT EXISTS (SELECT 1 FROM block_entry b
+                                   WHERE b.blocker_user_account_id = c.user_account_id AND b.unblocked_at IS NULL
+                                     AND (b.blocked_user_account_id = me.uid
+                                          OR b.blocked_organisation_id IN (SELECT organisation_id FROM my_orgs))))))
+$$;
+-- ponytail: one function call per row; measure on 1M profiles in M21 and inline into the policy if it shows.
+
+ALTER TABLE candidate_profile ENABLE ROW LEVEL SECURITY;
+CREATE POLICY candidate_profile_owner ON candidate_profile FOR ALL TO talentra_app
+    USING (user_account_id = app_current_user_id()) WITH CHECK (user_account_id = app_current_user_id());
+CREATE POLICY candidate_profile_platform_admin ON candidate_profile FOR ALL TO talentra_app
+    USING (app_has_permission('platform.admin')) WITH CHECK (app_has_permission('platform.admin'));
+CREATE POLICY candidate_profile_visible ON candidate_profile FOR SELECT TO talentra_app
+    USING (app_can_see_candidate(id));
+
+DO $$
+DECLARE t text;
+BEGIN
+    FOREACH t IN ARRAY ARRAY['candidate_email', 'candidate_phone', 'candidate_address', 'candidate_social_link', 'candidate_education',
+                             'candidate_work_experience', 'candidate_skill', 'candidate_language', 'candidate_certification',
+                             'candidate_preferred_location', 'candidate_preferred_job_role', 'resume'] LOOP
+        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+        EXECUTE format($p$CREATE POLICY %I ON %I FOR ALL TO talentra_app
+            USING (candidate_profile_id IN (SELECT id FROM candidate_profile WHERE user_account_id = app_current_user_id()))
+            WITH CHECK (candidate_profile_id IN (SELECT id FROM candidate_profile WHERE user_account_id = app_current_user_id()))$p$,
+            t || '_owner', t);
+        EXECUTE format($p$CREATE POLICY %I ON %I FOR ALL TO talentra_app
+            USING (app_has_permission('platform.admin')) WITH CHECK (app_has_permission('platform.admin'))$p$, t || '_platform_admin', t);
+        EXECUTE format('CREATE POLICY %I ON %I FOR SELECT TO talentra_app USING (app_can_see_candidate(candidate_profile_id))',
+            t || '_visible', t);
+    END LOOP;
+END $$;
+ALTER TABLE resume_version ENABLE ROW LEVEL SECURITY;
+CREATE POLICY resume_version_owner ON resume_version FOR ALL TO talentra_app
+    USING (resume_id IN (SELECT r.id FROM resume r JOIN candidate_profile c ON c.id = r.candidate_profile_id WHERE c.user_account_id = app_current_user_id()))
+    WITH CHECK (resume_id IN (SELECT r.id FROM resume r JOIN candidate_profile c ON c.id = r.candidate_profile_id WHERE c.user_account_id = app_current_user_id()));
+CREATE POLICY resume_version_platform_admin ON resume_version FOR ALL TO talentra_app
+    USING (app_has_permission('platform.admin')) WITH CHECK (app_has_permission('platform.admin'));
+CREATE POLICY resume_version_visible ON resume_version FOR SELECT TO talentra_app
+    USING (resume_id IN (SELECT r.id FROM resume r WHERE app_can_see_candidate(r.candidate_profile_id)));
+
+ALTER TABLE block_entry ENABLE ROW LEVEL SECURITY;
+CREATE POLICY block_entry_blocker ON block_entry FOR ALL TO talentra_app
+    USING (blocker_user_account_id = app_current_user_id()) WITH CHECK (blocker_user_account_id = app_current_user_id());
+CREATE POLICY block_entry_platform_admin ON block_entry FOR ALL TO talentra_app
+    USING (app_has_permission('platform.admin')) WITH CHECK (app_has_permission('platform.admin'));
+
+-- Views run with the caller's rights, so row-level security applies through them too.
+-- (Before M18 every v_ view ran as its owner and bypassed RLS: a recruiter could read
+-- another company's drafts through v_job_requirement.) m18 asserts it for every view.
+DO $$
+DECLARE r record;
+BEGIN
+    FOR r IN SELECT c.relname FROM pg_class c JOIN pg_namespace s ON s.oid = c.relnamespace
+             WHERE s.nspname = 'public' AND c.relkind = 'v' LOOP
+        EXECUTE format('ALTER VIEW %I SET (security_invoker = true)', r.relname);
+    END LOOP;
+END $$;
+
+-- -----------------------------------------------------------------------------
 -- Classification and nullability justification (rule groups 5, 6)
 -- -----------------------------------------------------------------------------
 COMMENT ON COLUMN user_credential.password_hash         IS 'class=Sensitive; argon2id encoded hash (salt and cost inside), never the password; null=social sign-in credential';

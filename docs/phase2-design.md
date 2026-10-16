@@ -193,7 +193,7 @@ Full column list with type, nullability, class, FK and null justification: **[`d
 
 | Rule | Mechanism |
 |---|---|
-| App never bypasses access rules | Application connects as `talentra_app` (owns nothing, so RLS applies). Migration and scheduled jobs use the owner role. |
+| App never bypasses access rules | Application connects as `talentra_app` (owns nothing, so RLS applies). Migration and scheduled jobs use the owner role. **Correction (M18):** the `v_` views ran with their owner's rights and so bypassed RLS (a recruiter could read another company's drafts through `v_job_requirement`). Since M18 every view is `security_invoker`, and m18 asserts it for every view. |
 | Permissions come from roles | `role_permission` matrix (6 permissions). `app_has_permission()` reads live platform grants; `app_organisation_ids_with()` reads live, effective-dated organisation mappings |
 | Recruiter sees only own company's requirements (§3) | RLS on `job_requirement`: org read/insert/update policies per permission, plus a public-board policy (published + open + not deleted) that **excludes current recruiters** |
 | Recruiter acts only on own company's applications | RLS on `application`: organisation policies via the job's organisation; candidates see only their own applications |

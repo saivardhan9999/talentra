@@ -61,7 +61,8 @@ INSERT INTO expected_entity VALUES
  (4,'analytics','dim_job_requirement'), (4,'analytics','fact_application'), (4,'analytics','fact_job_posting'),
  (4,'analytics','fact_profile_engagement'), (4,'analytics','fact_outreach'), (4,'analytics','fact_sourcing_request'),
  (4,'analytics','fact_payment'), (4,'analytics','fact_wallet_transaction'), (4,'analytics','fact_gig_assignment'),
- (4,'analytics','fact_login_daily'), (4,'analytics','fact_notification_daily'), (4,'analytics','fact_support_ticket');
+ (4,'analytics','fact_login_daily'), (4,'analytics','fact_notification_daily'), (4,'analytics','fact_support_ticket'),
+ (4,'analytics','agg_refresh_log');
 
 -- Lookup tables are owned by Master data, whichever phase added them.
 INSERT INTO expected_entity

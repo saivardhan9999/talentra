@@ -196,3 +196,55 @@ M16 passed on its first run.
 - A dropped fact → `dim_date` FK: m16 failed.
 - An FK from `fact_payment` to `payment_order`: m16 failed with "analytical table references a transactional table".
 - A clean rebuild then ended with `VERIFIED: m1 … m16`.
+
+---
+
+## Milestones 17–18 — Phase 4 columns, keys and constraints (schema complete)
+
+**M17 (done)**
+- The shared column checker now runs for Phase 4: 374 columns checked, every one classified, every date range with a CHECK. Date-range detection also covers `unblocked_at`, `resolved_at`, `closed_at` and `read_at`.
+- m17 also checks:
+  - credentials are Sensitive, and nothing secret-looking exists anywhere except as a hash (B56);
+  - the analytics layer holds no personal data;
+  - consent records carry full evidence;
+  - notification text is a short summary, not a message body;
+  - community text records its language.
+- `docs/phase4-data-dictionary.md` is generated: 32 tables.
+
+**M18 (done)**
+- **Deliveries (B57).**
+  - Preferences are applied on the way in: a channel switched off is stored as suppressed.
+  - Provider callbacks only move status forward, so replays and late callbacks are harmless.
+  - Status columns aren't indexed and partitions keep 30% free space, so callback updates stay cheap (HOT updates). New partitions inherit that setting.
+- **Analytics (B58).**
+  - Version history can't overlap and only the open version is current (exclusion constraint + CHECK).
+  - Version lookup functions, and a load step that opens a new version when a tracked attribute changes.
+  - `refresh_aggregates()` refreshes every summary view without blocking readers, and logs each refresh.
+- **Shared items (B59).**
+  - **Audit trail append-only for every partition.**
+  - Unique live credential per user and type; one social identity per user; argon2id format required; no in-place edits.
+  - Blocks belong to the blocker, one live block per target, and unblocking is final.
+  - **A blocked user or company can't see the candidate's profile, contact details or resumes** (row-level security on 14 tables), and can't see the block itself.
+
+**Two security holes found and fixed**
+| Problem | Cause | Fix |
+|---|---|---|
+| **A recruiter could read another company's draft requirements through `v_job_requirement`** (a Phase 2 hole, in place since M10) | PostgreSQL views run with their owner's rights by default, and the owner skips row-level security. RLS was on the table, but not applied through the view. Found while designing the candidate-visibility rule, and confirmed with a probe: 0 rows through the table, 1 through the view | Every view is now `security_invoker`. m18 checks the probe case and asserts the setting on **every** view, so a future view can't reopen it. Phase 2 doc carries a correction note |
+| **One month of the audit trail could be truncated directly** (`TRUNCATE audit_event_p202610` succeeded) | A statement-level `TRUNCATE` trigger on a partitioned table doesn't fire for a single partition. The app role never had TRUNCATE, but owners could do it, so "append-only for every role" wasn't true | `protect_partitions()` puts the trigger on every partition of every append-only table. `make_append_only` and `create_monthly_partitions` apply it to future partitions, and m18 tests one created later |
+
+**Other errors and fixes (M17–M18)**
+| Problem | Cause | Fix |
+|---|---|---|
+| A test expecting "another user editing the profile" to fail would itself have failed | Under row-level security, an update to a row you can't see touches 0 rows and raises no error | Caught before running. The test runs the update as a recruiter who can see the profile, then checks nothing changed. The first draft also used a recruiter whose company was blocked, so 0 rows would have proved nothing; switched to an unblocked one |
+| The first probe for the view hole showed 0 rows both ways | Running one milestone alone skips M5's sample data, so there were no jobs to leak | Probe rerun with another company's draft inserted: table 0, view 1 |
+| "relation … already exists, skipping" notices in m18 output | `create_monthly_partitions` used `CREATE TABLE IF NOT EXISTS` for the default partition | It now checks first with `to_regclass` |
+
+The M17 and M18 code both passed on the first run.
+
+**Proof the checks fail when they should:**
+- Removing the Sensitive class from `password_hash`: m17 failed.
+- Disabling RLS on `candidate_profile`: "blocked recruiter no longer sees the candidate" failed.
+- Turning `security_invoker` off on `v_job_requirement`: the view test failed.
+- Dropping one audit partition's TRUNCATE trigger: "truncating one month … accepted".
+- Dropping the delivery trigger: the suppression test failed.
+- A clean rebuild then ended with `VERIFIED: m1 … m18`. **Phase 4 and the database schema are complete.**

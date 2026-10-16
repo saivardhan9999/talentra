@@ -73,7 +73,7 @@ BEGIN
     FROM pg_class c JOIN pg_namespace s ON s.oid = c.relnamespace
     WHERE s.nspname = 'public' AND c.relkind IN ('r','p') AND NOT c.relispartition
       AND c.relname IN (SELECT table_name FROM expected_entity WHERE phase = p)
-      AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname ~ '(_to|_end_at|revoked_at|removed_at|decided_at|released_at|ended_at|cancelled_at|processed_at|delivered_at|responded_at)$')
+      AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname ~ '(_to|_end_at|revoked_at|removed_at|decided_at|released_at|ended_at|cancelled_at|processed_at|delivered_at|responded_at|unblocked_at|resolved_at|closed_at|read_at)$')
       AND NOT EXISTS (SELECT 1 FROM pg_constraint k WHERE k.conrelid = c.oid AND k.contype IN ('c','x')
                       AND (k.conname ~ '(date_range|after_applied|no_overlap)'));
     IF bad IS NOT NULL THEN RAISE EXCEPTION 'FAIL date range without CHECK: %', bad; END IF;

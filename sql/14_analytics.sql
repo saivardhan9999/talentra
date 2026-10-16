@@ -381,6 +381,86 @@ GROUP BY o.organisation_id, d.month_start, f.amount_currency_id, f.purpose_code;
 CREATE UNIQUE INDEX uq_agg_revenue_monthly_org_month_currency_purpose ON agg_revenue_monthly (organisation_id, month_start, amount_currency_id, purpose_code);
 
 -- -----------------------------------------------------------------------------
+-- M18 (B58) slowly changing dimension keys. A type 2 dimension keeps one row per
+-- version: versions of one source row never overlap (exclusion), exactly the open
+-- version is current, and facts point at the version valid when the event happened.
+-- -----------------------------------------------------------------------------
+ALTER TABLE dim_organisation
+    ADD CONSTRAINT ck_dim_organisation_current CHECK (is_current = (valid_to IS NULL)),
+    ADD CONSTRAINT uq_dim_organisation_no_overlap EXCLUDE USING gist (organisation_id WITH =, tstzrange(valid_from, valid_to) WITH &&);
+CREATE UNIQUE INDEX uq_dim_organisation_organisation_id_current ON dim_organisation (organisation_id) WHERE is_current;
+ALTER TABLE dim_candidate
+    ADD CONSTRAINT ck_dim_candidate_current CHECK (is_current = (valid_to IS NULL)),
+    ADD CONSTRAINT uq_dim_candidate_no_overlap EXCLUDE USING gist (candidate_profile_id WITH =, tstzrange(valid_from, valid_to) WITH &&);
+CREATE UNIQUE INDEX uq_dim_candidate_candidate_profile_id_current ON dim_candidate (candidate_profile_id) WHERE is_current;
+
+-- The version valid at a moment: what a fact load attaches to an event.
+CREATE OR REPLACE FUNCTION dim_organisation_version(p_organisation_id bigint, p_at timestamptz) RETURNS bigint
+LANGUAGE sql STABLE AS $$
+    SELECT id FROM dim_organisation WHERE organisation_id = p_organisation_id AND tstzrange(valid_from, valid_to) @> p_at
+$$;
+CREATE OR REPLACE FUNCTION dim_candidate_version(p_candidate_profile_id bigint, p_at timestamptz) RETURNS bigint
+LANGUAGE sql STABLE AS $$
+    SELECT id FROM dim_candidate WHERE candidate_profile_id = p_candidate_profile_id AND tstzrange(valid_from, valid_to) @> p_at
+$$;
+
+-- Type 2 load step for organisations: a change of a tracked attribute closes the current
+-- version and opens a new one at p_at; the display name is type 1 (corrected in place).
+-- ponytail: dim_candidate is loaded with the same pattern by the M19 loader.
+CREATE OR REPLACE PROCEDURE dim_organisation_apply(p_organisation_id bigint, p_display_name varchar, p_type_code varchar,
+    p_industry_code varchar, p_size_band_code varchar, p_verification_code varchar, p_hq_dim_location_id bigint, p_at timestamptz)
+LANGUAGE plpgsql AS $$
+DECLARE cur dim_organisation;
+BEGIN
+    SELECT * INTO cur FROM dim_organisation WHERE organisation_id = p_organisation_id AND is_current FOR UPDATE;
+    IF FOUND AND (cur.organisation_type_code, cur.industry_code, cur.company_size_band_code, cur.verification_status_code, cur.hq_dim_location_id)
+                 IS NOT DISTINCT FROM (p_type_code, p_industry_code, p_size_band_code, p_verification_code, p_hq_dim_location_id) THEN
+        UPDATE dim_organisation SET display_name = p_display_name WHERE id = cur.id AND display_name <> p_display_name;
+        RETURN;
+    END IF;
+    IF FOUND THEN
+        UPDATE dim_organisation SET valid_to = p_at, is_current = false WHERE id = cur.id;
+    END IF;
+    INSERT INTO dim_organisation (organisation_id, display_name, organisation_type_code, industry_code, company_size_band_code,
+                                  verification_status_code, hq_dim_location_id, valid_from, is_current)
+    VALUES (p_organisation_id, p_display_name, p_type_code, p_industry_code, p_size_band_code, p_verification_code, p_hq_dim_location_id, p_at, true);
+END $$;
+
+-- -----------------------------------------------------------------------------
+-- M18 (B58) aggregate refresh rule. After every fact load the load job calls
+-- refresh_aggregates(): each agg_ view is refreshed CONCURRENTLY (readers keep the
+-- previous contents meanwhile; this needs the unique index every aggregate has) and
+-- logged. Dashboards show the last finished_at as "data as of".
+-- -----------------------------------------------------------------------------
+CREATE TABLE agg_refresh_log (
+    id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    aggregate_name varchar(63) NOT NULL,
+    started_at     timestamptz NOT NULL,
+    finished_at    timestamptz NOT NULL,
+    row_count      bigint      NOT NULL,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    created_by     bigint      NOT NULL DEFAULT coalesce(app_current_user_id(), 1) REFERENCES user_account (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT ck_agg_refresh_log_aggregate_name CHECK (aggregate_name ~ '^agg_[a-z0-9_]+$'),
+    CONSTRAINT ck_agg_refresh_log_date_range CHECK (finished_at >= started_at),
+    CONSTRAINT ck_agg_refresh_log_row_count CHECK (row_count >= 0)
+);
+CREATE INDEX idx_agg_refresh_log_aggregate_name ON agg_refresh_log (aggregate_name, finished_at DESC);
+CALL make_append_only('agg_refresh_log');
+
+CREATE OR REPLACE PROCEDURE refresh_aggregates()
+LANGUAGE plpgsql AS $$
+DECLARE r record; t0 timestamptz; n bigint;
+BEGIN
+    FOR r IN SELECT c.relname FROM pg_class c JOIN pg_namespace s ON s.oid = c.relnamespace
+             WHERE s.nspname = 'public' AND c.relkind = 'm' AND c.relname ~ '^agg_' ORDER BY c.relname LOOP
+        t0 := clock_timestamp();
+        EXECUTE format('REFRESH MATERIALIZED VIEW CONCURRENTLY %I', r.relname);
+        EXECUTE format('SELECT count(*) FROM %I', r.relname) INTO n;
+        INSERT INTO agg_refresh_log (aggregate_name, started_at, finished_at, row_count) VALUES (r.relname, t0, clock_timestamp(), n);
+    END LOOP;
+END $$;
+
+-- -----------------------------------------------------------------------------
 -- Classification and nullability justification (rule groups 5, 6)
 -- -----------------------------------------------------------------------------
 COMMENT ON COLUMN dim_date.calendar_date            IS 'class=Public';
@@ -472,6 +552,11 @@ COMMENT ON COLUMN fact_support_ticket.resolved_date_id IS 'class=Internal; null=
 COMMENT ON COLUMN fact_support_ticket.category_code IS 'class=Internal';
 COMMENT ON COLUMN fact_support_ticket.priority_code IS 'class=Internal';
 COMMENT ON COLUMN fact_support_ticket.hours_to_resolve IS 'class=Internal; null=unresolved';
+
+COMMENT ON COLUMN agg_refresh_log.aggregate_name IS 'class=Internal';
+COMMENT ON COLUMN agg_refresh_log.started_at     IS 'class=Internal';
+COMMENT ON COLUMN agg_refresh_log.finished_at    IS 'class=Internal; shown on dashboards as data as of';
+COMMENT ON COLUMN agg_refresh_log.row_count      IS 'class=Internal';
 
 CALL attach_audit_triggers();
 RESET app.current_user_id;
