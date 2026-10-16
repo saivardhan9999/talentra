@@ -218,11 +218,16 @@ CREATE TRIGGER trg_outreach_batch_rules BEFORE INSERT OR UPDATE OF sourcing_requ
 -- -----------------------------------------------------------------------------
 -- M14 (B47, M12 deviation): a consumption entry pays for exactly one thing (download,
 -- view or outreach batch) of the paying organisation. The partitioned history tables
--- cannot carry a unique index on the entry, so an advisory lock on the entry id
+-- cannot carry a unique index on the entry, so a row lock on the ledger entry
 -- serialises two charges of the same entry and the second one sees the first.
+-- A row lock is kept on the row itself; an advisory lock per row (the first design)
+-- took a shared lock-table slot per charged row until commit and ran out of shared
+-- memory when 175k downloads were loaded in one statement (M19, full scale).
+-- Definer rights: the application role may not update ledger rows (append-only), so it
+-- cannot take the row lock itself, and the check must see every charge regardless of RLS.
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION trg_credit_charge_rules() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     r       jsonb  := to_jsonb(NEW);
     v_entry bigint := (r ->> 'wallet_ledger_entry_id')::bigint;
@@ -231,7 +236,7 @@ BEGIN
     IF v_entry IS NULL OR (TG_OP = 'UPDATE' AND v_entry IS NOT DISTINCT FROM (to_jsonb(OLD) ->> 'wallet_ledger_entry_id')::bigint) THEN
         RETURN NEW;
     END IF;
-    PERFORM pg_advisory_xact_lock(v_entry);
+    PERFORM 1 FROM wallet_ledger_entry WHERE id = v_entry FOR UPDATE;
     IF NOT EXISTS (SELECT 1 FROM wallet_ledger_entry e JOIN wallet w ON w.id = e.wallet_id
                    WHERE e.id = v_entry AND e.wallet_entry_type_id = 2 AND w.organisation_id = v_org) THEN
         RAISE EXCEPTION 'ledger entry % is not a consumption from the acting organisation''s wallet', v_entry;

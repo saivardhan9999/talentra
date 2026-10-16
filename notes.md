@@ -248,3 +248,52 @@ The M17 and M18 code both passed on the first run.
 - Dropping one audit partition's TRUNCATE trigger: "truncating one month … accepted".
 - Dropping the delivery trigger: the suppression test failed.
 - A clean rebuild then ended with `VERIFIED: m1 … m18`. **Phase 4 and the database schema are complete.**
+
+---
+
+## Milestones 19–20 — Seed data, queries and validation (laptop scale)
+
+**M19 (done)**
+- A data generator in `sql/seed/` (11 steps). It's set-based SQL inside PostgreSQL and deterministic, and `SEED_SCALE` scales it. It ran at laptop scale with every rule switched on: **1,000,000 profiles, 100,000 requirements, 4,999,885 applications with 10.5M history rows**, and every one of the 214 tables seeded. Database: 16 GB; load time about 1 h 40 min.
+- Realism:
+  - names in English and seven Indian scripts (28% non-Latin);
+  - skew towards metros, popular skills and big employers;
+  - 2% duplicate registrations, half unflagged;
+  - planted import defects.
+- The seed goes through the real rules:
+  - logins via `app_open_session()`: 7,366 refused at the device limit;
+  - gig assignments one by one through the exclusion constraint: 657 overlaps rejected and logged;
+  - sourcing decisions taken as the employer.
+- One documented exception: the two pipeline triggers are paused for the bulk load, so application history gets real dates instead of "now". M20 proves every history is a legal path.
+- `m19_seed.sql` checks volumes against the scale, every table populated, duplicates, multilingual names, all 12 pipeline statuses with history, the rules exercised, and the marts matching the source rows.
+- The runner seeds automatically before the first M19+ check after a rebuild, so M1–M18 still run on the empty schema.
+
+**M20 (done)**
+- 13 fixed queries (functional, transactional, lookup, performance) and 13 module queries in `sql/queries/`, plus `validation.sql` (26 Section 5 / design rules, 7 data-quality findings).
+- `run_report.sh` writes `docs/phase5-query-report.md` (SQL, real output and `EXPLAIN ANALYZE` plans for the top ten) and `docs/phase5-seed-validation.md`.
+- Full scale: every query returns results; **0 violations across 26 rules**; all findings detected.
+- Query times: job search 8 ms, candidate search 31 ms, most lookups under 1 ms. Duplicate detection takes 2.2 s and time-to-hire by industry 0.8 s, the first targets for M21.
+- `docs/coverage-gap-register.md`: the competitor benchmark against Naukri, Monster and LinkedIn that docket §4 requires but no earlier phase had produced, with gaps G1–G12 and data-quality items Q1–Q4.
+
+**Errors and fixes (M19–M20)**
+| Problem | Cause | Fix |
+|---|---|---|
+| **Schema design flaw: "out of shared memory"** loading 175k paid downloads | The M14 one-charge-per-entry rule took an advisory lock per charged row, and each one holds a shared lock-table slot until commit. Fine one at a time; fails on any bulk load | Lock the ledger row instead (`SELECT … FOR UPDATE`, definer rights since the app role can't update ledger rows). Same guarantee, no lock-table use. Phase 3 doc updated; M14 re-run and passing, including the concurrent-login test |
+| "could not resize shared memory segment … No space left on device" (the disk wasn't full) | Docker gives containers 64 MB of `/dev/shm`; parallel hash joins with `work_mem = 64MB` outgrew it | Recreated the container with `--shm-size=1g` on the same data volume; docs updated |
+| Outreach rejected: "needs membership of its organisation" | The generator used recruiters who had moved company; the M14 rule refused them | The generator picks current members only |
+| Block rejected by `ck_block_entry_date_range` | The generator could unblock before the block | The unblock time is derived from the block time |
+| Validation: 655 applications before their job was published | The generator capped application time at "an hour ago", earlier than jobs published in the last hour | Generator fixed. Repaired in place: 12 jobs' `published_at` moved before their first application (a normal update; history untouched) |
+| Finding inflated: 1.37M late applications (27%) | The generator spread applications over 90 days while postings expire after 30–90 days | Generator fixed for future seeds; the current dataset reports the inflated finding honestly |
+| 10 applications missing from the facts (found by M19 at 1%) | Candidates registered in the last hour got an application time before their registration | Registrations end two days before the seed's "now" |
+| Fact load stuck for 10 minutes at 1% scale | The new dimension tables had no statistics, so the planner nested loops | `ANALYZE` before loading the facts |
+| Questionnaires had 0 rows at 1% scale | "2% of organisations" selected none of 200 | The 3 largest employers always screen |
+| `ON CONFLICT`-free uniqueness and NULL-knockout errors, and `g` column clashes, while writing the generator | Small generator mistakes | Fixed as found |
+| **Runner bug:** `./run_phase1.sh m19 m20 m14` ran only `m19` | The runner read only `$1`, so every multi-milestone command since M1 ran only its first milestone | The runner takes every argument (`LIST="${*:-$ALL}"`) |
+| Q7 failed: "app.current_user_id is not set" | Debiting the wallet updates its audit columns, and the schema refuses anonymous updates | Q7 runs as the company's recruiter |
+| The M20 test's `CREATE TEMP TABLE … AS` + `\ir file` didn't join | A psql quirk | Query files loaded into a variable (without the final semicolon) |
+| `run_report.sh` stopped after A2 | `grep` with no matches exits 1 under `set -eo pipefail` | Those filters tolerate empty input |
+| PowerShell `powercfg` failed from Git Bash ("Invalid Parameters") | Git Bash rewrote `/change` into a path | Ran it through PowerShell |
+
+**Also done:** a `/doctor` health check. Unused GSD commands and agents were moved to `~/.claude/disabled/`, and auto mode is now the default permission mode.
+
+**Disk:** the seeded database is 16 GB, and C: had 12 GB free afterwards.

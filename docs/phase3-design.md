@@ -156,7 +156,7 @@ erDiagram
 
 PostgreSQL checks a composite FK only when every column is set (MATCH SIMPLE). Where one column can be NULL on its own, a CHECK closes the gap (`ck_login_attempt_device_needs_user`, `ck_outreach_batch_sourcing_request`), or a single-column FK keeps the lone column checked (`session_revocation_event.user_session_id`).
 
-**Deviation — credit link on partitioned history.** `profile_download_event` and `profile_view_event` are partitioned. PostgreSQL requires a unique index on a partitioned table to include the partition key, so "one ledger entry pays for one download" cannot be a unique constraint. M14 enforces it with a trigger and an advisory lock instead (see B47).
+**Deviation — credit link on partitioned history.** `profile_download_event` and `profile_view_event` are partitioned. PostgreSQL requires a unique index on a partitioned table to include the partition key, so "one ledger entry pays for one download" cannot be a unique constraint. M14 enforces it with a trigger and a row lock on the ledger entry instead (see B47).
 
 ## Milestone 13 — Columns (B42–B44)
 
@@ -237,7 +237,7 @@ With the `FOR UPDATE` removed, the test fails with "second concurrent login did 
 | A recharge credits exactly what was bought | trigger: paid wallet-recharge order of the wallet's organisation, `credit_delta = credit_quantity` (M13 column), at most once (unique) |
 | Refunds never exceed the payment | `trg_refund_rules` locks the order row and sums non-failed refunds; paid orders only; same currency |
 | Invoices bill a paid order exactly | trigger: total and currency equal the order's |
-| Download/view history carries the credit deduction, **one deduction per charge** | `trg_credit_charge_rules` on downloads, views and outreach: the entry must be a consumption from the acting organisation's wallet and not already used. An advisory lock on the entry id serialises two charges of the same entry. This resolves the M12 deviation without a unique index on the partitioned tables |
+| Download/view history carries the credit deduction, **one deduction per charge** | `trg_credit_charge_rules` on downloads, views and outreach: the entry must be a consumption from the acting organisation's wallet and not already used. A row lock on the ledger entry (`SELECT … FOR UPDATE`, taken with definer rights because the application role may not update ledger rows) serialises two charges of the same entry. The first design used an advisory lock per charge; full-scale seeding (M19) showed it takes a shared lock-table slot per row until commit and runs out of shared memory on bulk loads, so it was replaced. This resolves the M12 deviation without a unique index on the partitioned tables |
 
 **Bug found by the M14 tests.** The M13 CHECK on `payment_order.credit_quantity` let a wallet recharge with no quantity through. The expression evaluated to NULL, and a NULL CHECK result counts as a pass. It is now written to evaluate to false in that case: `(purpose = 2) = (credit_quantity IS NOT NULL) AND credit_quantity > 0`.
 
@@ -250,7 +250,7 @@ With the `FOR UPDATE` removed, the test fails with "second concurrent login did 
 |---|---|---|---|
 | 2 — CHECK with lookup values | Ledger, order and sourcing rules use SYSTEM lookup ids (marked `SYSTEM:` in each lookup comment) | A CHECK cannot look up a code | Ids < 1000 reserved; system codes immutable (Phase 1 trigger) |
 | 1 — PK named `id` | `login_attempt`, `profile_download_event` PK `(id, time)` | Partition key must be in the PK | Same as Phase 1 history tables |
-| 2 — unique constraints | "One deduction per charge" on partitioned history is a trigger + advisory lock, not a unique index | PostgreSQL unique indexes on partitioned tables must include the partition key | Trigger tested; lock serialises concurrent charges |
+| 2 — unique constraints | "One deduction per charge" on partitioned history is a trigger + row lock on the ledger entry, not a unique index | PostgreSQL unique indexes on partitioned tables must include the partition key | Trigger tested; lock serialises concurrent charges |
 | 9 — device limit | Users without a licence have no device limit | The limit is defined per licence | Revocation and login history still apply to them |
 | Concurrency | Seat and device locks assume READ COMMITTED or SERIALIZABLE | Updating the seat row on every login would also audit every login | `ponytail:` comment names the upgrade path |
 | 10 — refunds | A refund's ledger debit is not tied to the refunded amount in credits | Credit price can change between recharge and refund (D17) | The debit references the refund; finance reconciles by the refund id |

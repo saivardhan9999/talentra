@@ -10,7 +10,7 @@ PostgreSQL 16 schema for the Talentra job search and demand management platform.
 
 ## Run
 ```sh
-docker run -d --name talentra-pg -e POSTGRES_PASSWORD=talentra -p 5432:5432 \
+docker run -d --name talentra-pg --shm-size=1g -e POSTGRES_PASSWORD=talentra -p 5432:5432 \
   -v "$PWD/sql:/sql" postgres:16
 MSYS_NO_PATHCONV=1 ./run_phase1.sh        # rebuild + verify milestones 1-6
 MSYS_NO_PATHCONV=1 ./run_phase1.sh m3     # rebuild + verify one milestone
