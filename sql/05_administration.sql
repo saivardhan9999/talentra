@@ -143,5 +143,7 @@ COMMENT ON COLUMN audit_event.source_ip          IS 'class=Personal; null=server
 COMMENT ON COLUMN audit_event.user_agent         IS 'class=Personal; null=server-side action';
 COMMENT ON COLUMN audit_event.detail             IS 'class=Personal; changed fields, never secrets; bounded 8 KB; null=action needs no detail';
 
+COMMENT ON COLUMN user_account_role.granted_at   IS 'class=Internal; grant takes effect';
+COMMENT ON COLUMN audit_event.occurred_at        IS 'class=Internal; UTC time of the action (partition key)';
 CALL attach_audit_triggers();
 RESET app.current_user_id;

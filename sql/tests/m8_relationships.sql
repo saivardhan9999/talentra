@@ -24,7 +24,7 @@ INSERT INTO expected_fk VALUES
  ('organisation_registration_identifier','verification_status_id','verification_status','r', false),
  ('organisation_member','organisation_id','organisation','r', false),
  ('organisation_member','user_account_id','user_account','r', false),
- ('organisation_member','organisation_member_type_id','organisation_member_type','r', false),
+ ('organisation_member','role_id','role','r', false),
  -- Gig: worker side
  ('gig_worker_profile','user_account_id','user_account','r', true),
  ('gig_worker_service','gig_worker_profile_id','gig_worker_profile','c', false),

@@ -38,7 +38,17 @@ INSERT INTO expected_entity VALUES
  -- Gig marketplace (Member C)
  (2,'gig','gig_worker_profile'), (2,'gig','gig_worker_service'), (2,'gig','gig_worker_availability'),
  (2,'gig','gig_request'), (2,'gig','gig_request_skill'), (2,'gig','gig_application'), (2,'gig','gig_assignment'),
- (2,'gig','gig_earning_snapshot'), (2,'gig','gig_rating'), (2,'gig','gig_worker_list_entry');
+ (2,'gig','gig_earning_snapshot'), (2,'gig','gig_rating'), (2,'gig','gig_worker_list_entry'),
+ -- Licences, seats, devices and sessions (Member A)
+ (3,'licences','licence'), (3,'licences','licence_seat'), (3,'licences','user_device'), (3,'licences','user_session'),
+ (3,'licences','login_attempt'), (3,'licences','session_revocation_event'),
+ -- Sourcing and consultant requests (Member B)
+ (3,'sourcing','sourcing_request'), (3,'sourcing','outreach_batch'), (3,'sourcing','outreach_recipient'),
+ -- Subscriptions, wallet, payments and download history (Member C)
+ (3,'subscriptions','plan'), (3,'subscriptions','plan_entitlement'), (3,'subscriptions','subscription'),
+ (3,'subscriptions','subscription_period'), (3,'subscriptions','payment_order'), (3,'subscriptions','payment_event'),
+ (3,'subscriptions','invoice'), (3,'subscriptions','refund'), (3,'subscriptions','wallet'),
+ (3,'subscriptions','wallet_ledger_entry'), (3,'subscriptions','profile_download_event');
 
 -- Lookup tables are owned by Master data, whichever phase added them.
 INSERT INTO expected_entity
