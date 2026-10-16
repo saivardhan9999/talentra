@@ -120,4 +120,79 @@ The first m13 run passed: every Phase 3 column had already been classified in M1
 
 **Proof the checks fail when they should:** removing the class comment on `licence_seat.released_at` made m13 fail with "1 data column without an explicit class", and changing `wallet_ledger_entry.balance_after` to `bigint` made it fail with "credit column not an integer". A clean rebuild then ended with `VERIFIED: m1 … m13`.
 
-**M14:** not started.
+**M14 (done)**
+- **Device limit at login, safe under concurrency (B45).**
+  - Opening a session locks the user's seat row (`FOR UPDATE`), then counts live sessions. Two simultaneous logins queue, and the second one sees the first.
+  - A session counts while `ended_at` is NULL and `expires_at` is in the future. Logout, revocation or expiry releases it.
+  - Login goes through `app_open_session()`. At the limit it records the refusal in `login_attempt` and `audit_event` and returns NULL instead of raising, so the record isn't rolled back.
+  - The seat limit works the same way, by locking the licence row.
+  - Releasing a seat or revoking a device ends its sessions, and each revocation is an event.
+- **Consultants (B46):** only users with the consultant role, only for themselves, only on requirements open to consultants. Only the employer (with `job_requirement.manage`) accepts or declines, and the decision is final. Shortlisting and outreach need an accepted request, and stop the moment the requirement closes to consultants.
+- **Money (B47):**
+  - Subscription periods can't overlap (exclusion constraint).
+  - The ledger trigger locks the wallet, computes the balance and blocks overdrafts. The wallet balance can't be edited directly.
+  - Entry types fix sign and references; reversals must negate the original exactly, once.
+  - A recharge credits exactly the credits bought.
+  - Refunds never exceed the payment; invoices bill exactly the order amount.
+  - A credit deduction pays for one download, view or outreach only. This is a trigger plus an advisory lock, which settles the M12 limitation without a unique index.
+- `m14_constraints.sql`: 73 behavioural checks in a rolled-back transaction, plus a **real two-connection concurrency test** through `dblink`. Connection 2 must still be waiting after one second while connection 1 holds the lock, and must get no session once connection 1 commits.
+- Lookup comments now mark the SYSTEM ids that CHECKs and triggers rely on.
+
+**Errors and fixes (M14)**
+| Problem | Cause | Fix |
+|---|---|---|
+| **Real bug, found by the test:** a wallet-recharge order with no credit quantity was accepted | The M13 CHECK `credit_quantity > 0 AND purpose = 2 OR credit_quantity IS NULL AND purpose <> 2` evaluates to NULL in that case, and PostgreSQL treats a NULL CHECK result as a pass | Rewrote it as `(purpose = 2) = (credit_quantity IS NOT NULL) AND credit_quantity > 0`, which is false in that case. Checked every other new CHECK for the same trap |
+| m12 test broke after the M14 rules were added | Its sourcing request came from a non-consultant on a closed requirement. The new BEFORE triggers rejected it before the FK under test was ever checked | m12 now sets up a real consultant, an employer and an accepted request on an open requirement, so only the composite FK can reject the outreach |
+| m14 stopped with "null value in column candidate_profile_id" | Running `./run_phase1.sh m14` alone skips M5's sample data, so there were no candidate profiles | The test registers its own two candidates |
+| The first draft of the concurrency fixture used `INSERT … RETURNING` inside a subquery | PostgreSQL doesn't allow that | Spotted before running; replaced with two plain inserts into variables |
+| The device-limit test needed a session that had already expired | `ck_user_session_date_range` requires `expires_at > started_at`, and `started_at` defaults to the transaction time | Test sessions start two hours in the past, so one can be expired by moving `expires_at` back |
+| Break-test commands failed: `C:/Users/.../Temp/fn.sql: No such file`, and "cannot change name of input parameter" | Git Bash rewrote the container path; the replacement function used a different parameter name | Piped the SQL through stdin with `MSYS_NO_PATHCONV=1` and kept the original parameter name |
+
+**Proof the checks fail when they should:**
+- Removing the seat `FOR UPDATE` locks: "second concurrent login did not wait for the first".
+- Dropping the period exclusion: "overlapping subscription periods … accepted".
+- Making `app_job_open_to_consultants()` always true: "consultant requesting a requirement closed to consultants … accepted".
+- A clean rebuild then ended with `VERIFIED: m1 … m14`. **Phase 3 is complete.**
+
+---
+
+## Milestones 15–16 — Phase 4 entities and relationships
+
+**M15 (done)**
+- `sql/12_notifications.sql` (11 tables): user preferences (language + privacy in one row per user), notification preferences, job alerts, notifications, deliveries (partitioned monthly, the high-volume path), community posts and reactions, support tickets and messages, FAQs (as UI label keys), referral events.
+- `sql/13_shared.sql` (4 tables): credentials (argon2id hash or HMAC of the social sign-in id), consent records (append-only history), block entries (a user blocks one user or one organisation), system error log (closes the Tier 1 "system errors" gap). Sessions and the audit trail are reused from Phases 2–3, not duplicated (D21).
+- `sql/14_analytics.sql`: star schema.
+  - 5 dimensions; `dim_organisation` and `dim_candidate` keep version history (SCD type 2).
+  - 11 facts and 4 aggregates (materialised views).
+  - Every object is prefixed `dim_`, `fact_` or `agg_` (rule group 8).
+  - Facts keep the source id as a plain value with no FK, so the marts are decoupled from transactional rows (D19).
+- `m15_entities.sql` checks:
+  - all 16 docket items map to an entity, and the prefix rule holds;
+  - aggregates read only facts and dimensions;
+  - every KPI has a fact, and notifications store no message body.
+- **Docket gap found:** B49 says "the KPIs in Section 8", but the 12-page docket has no Section 8 (it ends at Section 7). I derived 13 KPIs from the §2 workflows and recorded the gap in `docs/phase4-design.md` for you to raise with the organisers.
+
+**M16 (done)**
+- `m16_relationships.sql` lists 40 Phase 4 relationships with their delete rules, covering every pair the docket names: preference → user, delivery → notification, post → reaction, fact → dimension, aggregate → fact, credential / consent / session → user, audit event → actor, block → blocker and blocked.
+- Star-schema rules are checked across all analytical tables, not just a sample:
+  - every date key points at `dim_date`, and every `dim_x_id` points at `dim_x` (38 fact → dimension FKs);
+  - analytical tables point only at other analytical tables, currency and the audit actor;
+  - each aggregate reads from its facts.
+- ER diagrams and cardinality tables are in `docs/phase4-design.md`.
+- The M5 message "4 history tables partitioned", stale since Phase 2, now reports the real count (9 partitioned tables, 225 partitions).
+
+**Errors and fixes (M15–M16)**
+| Problem | Cause | Fix |
+|---|---|---|
+| The first full run stopped in m4: "reserved word used as identifier: status_code" | `fact_gig_assignment.status_code` is on the MySQL reserved-word list that m4 enforces | Renamed it to `assignment_status_code` |
+| Partitioning `notification` would break the FK naming rule | An FK to a partitioned table must include its timestamp partition key, and m4 requires every FK column to end in `_id` | Spotted before building: only `notification_delivery` (the high-volume table) is partitioned, and `notification` stays a plain FK target (D22) |
+| The KPI list the docket refers to doesn't exist | The docket references Section 8, which is missing from the PDF | Derived the KPIs from the workflows; the gap is recorded for the organisers |
+| A break test on M16 failed at the listed-FK check, not the general rule I meant to test | The dropped FK (`fact_application.applied_date_id`) is also in the hand-written list | Repeated it with an unlisted FK (`fact_outreach.sent_date_id`): the general rule caught it ("dimension key without its FK") |
+
+M16 passed on its first run.
+
+**Proof the checks fail when they should:**
+- An aggregate reading `job_requirement`: m15 failed with "aggregate reads a transactional table".
+- A dropped fact → `dim_date` FK: m16 failed.
+- An FK from `fact_payment` to `payment_order`: m16 failed with "analytical table references a transactional table".
+- A clean rebuild then ended with `VERIFIED: m1 … m16`.

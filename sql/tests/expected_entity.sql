@@ -48,7 +48,20 @@ INSERT INTO expected_entity VALUES
  (3,'subscriptions','plan'), (3,'subscriptions','plan_entitlement'), (3,'subscriptions','subscription'),
  (3,'subscriptions','subscription_period'), (3,'subscriptions','payment_order'), (3,'subscriptions','payment_event'),
  (3,'subscriptions','invoice'), (3,'subscriptions','refund'), (3,'subscriptions','wallet'),
- (3,'subscriptions','wallet_ledger_entry'), (3,'subscriptions','profile_download_event');
+ (3,'subscriptions','wallet_ledger_entry'), (3,'subscriptions','profile_download_event'),
+ -- Notifications, preferences and community (team)
+ (4,'notifications','user_preference'), (4,'notifications','notification_preference'), (4,'notifications','job_alert'),
+ (4,'notifications','notification'), (4,'notifications','notification_delivery'), (4,'notifications','community_post'),
+ (4,'notifications','community_reaction'), (4,'notifications','support_ticket'), (4,'notifications','support_ticket_message'),
+ (4,'notifications','faq'), (4,'notifications','referral_event'),
+ -- Shared team items (user_session and audit_event are reused from licences / administration)
+ (4,'shared','user_credential'), (4,'shared','consent_record'), (4,'shared','block_entry'), (4,'shared','system_error_event'),
+ -- Analytics layer (aggregates are materialised views, checked in m15)
+ (4,'analytics','dim_date'), (4,'analytics','dim_location'), (4,'analytics','dim_organisation'), (4,'analytics','dim_candidate'),
+ (4,'analytics','dim_job_requirement'), (4,'analytics','fact_application'), (4,'analytics','fact_job_posting'),
+ (4,'analytics','fact_profile_engagement'), (4,'analytics','fact_outreach'), (4,'analytics','fact_sourcing_request'),
+ (4,'analytics','fact_payment'), (4,'analytics','fact_wallet_transaction'), (4,'analytics','fact_gig_assignment'),
+ (4,'analytics','fact_login_daily'), (4,'analytics','fact_notification_daily'), (4,'analytics','fact_support_ticket');
 
 -- Lookup tables are owned by Master data, whichever phase added them.
 INSERT INTO expected_entity

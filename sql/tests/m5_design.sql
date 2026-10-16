@@ -108,7 +108,8 @@ BEGIN
     WHERE (SELECT relkind FROM pg_class WHERE relname = t) <> 'p';
     IF bad IS NOT NULL THEN RAISE EXCEPTION 'FAIL not partitioned: %', bad; END IF;
     SELECT count(*) INTO n FROM pg_class WHERE relispartition AND relkind = 'r' AND relname ~ '_p(\d{6}|default)$';
-    RAISE NOTICE 'PASS 4 history tables partitioned monthly (% partitions named <table>_pYYYYMM / _pdefault)', n;
+    RAISE NOTICE 'PASS the 4 Phase 1 history tables are partitioned monthly; % partitioned tables in all, % partitions named <table>_pYYYYMM / _pdefault',
+        (SELECT count(*) FROM pg_class WHERE relkind = 'p'), n;
 
     SELECT count(*) INTO n FROM application_status_history;
     RAISE NOTICE 'PASS pipeline trigger wrote % history rows for % sample applications', n, (SELECT count(*) FROM application);

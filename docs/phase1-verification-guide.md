@@ -20,7 +20,7 @@ A milestone is verified when its script passes **and** a reviewer ticks its chec
    ```sh
    MSYS_NO_PATHCONV=1 ./run_phase1.sh
    ```
-   **Expected:** the last line is `VERIFIED: m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11 m12 m13` and `echo $?` prints `0`. Any `ERROR` / `FAIL` line stops the run with a non-zero exit code.
+   **Expected:** the last line is `VERIFIED: m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11 m12 m13 m14 m15 m16` and `echo $?` prints `0`. Any `ERROR` / `FAIL` line stops the run with a non-zero exit code.
 
 > `MSYS_NO_PATHCONV=1` is only needed in Git Bash on Windows. It stops `/sql/...` being rewritten to a Windows path.
 > `./run_phase1.sh m3` rebuilds the database and verifies one milestone. `./run_phase1.sh --no-build m3` verifies against the existing database.
@@ -56,7 +56,7 @@ PASS extensions pg_trgm (search) and btree_gist (exclusion constraints) installe
 ```sh
 MSYS_NO_PATHCONV=1 ./run_phase1.sh m2
 ```
-Expected: one `PASS <module> : N entities present` per module (profile 27, jobs_applications 18, master_data 14, lookups 69 incl. 13 added in Phase 2 and 16 in Phase 3, plus the user_account and organisation shells), then
+Expected: one `PASS <module> : N entities present` per module (profile 27, jobs_applications 18, master_data 14, lookups 83 incl. 13 added in Phase 2, 16 in Phase 3 and 14 in Phase 4, plus the user_account and organisation shells), then
 `PASS no orphan tables; gig entities kept out of the core pipeline (D3)`.
 
 What it proves: every entity on the agreed list exists, **and** no table exists that isn't on the list. A new table therefore has to be added to `m2_entities.sql` with an owning module.
@@ -77,7 +77,7 @@ MSYS_NO_PATHCONV=1 ./run_phase1.sh m3
 Expected:
 ```
 PASS 33 documented relationships exist with the stated cardinality and ON DELETE rule
-PASS all 703 foreign keys state explicit ON UPDATE and ON DELETE rules
+PASS all 894 foreign keys state explicit ON UPDATE and ON DELETE rules
 ```
 followed by a summary of FKs per delete rule (`r` restrict, `c` cascade, `n` set null).
 
@@ -131,7 +131,7 @@ This loads 20,000 candidates, 2,000 jobs and 40,000 applications inside a transa
 Expected: 9 `PASS idx_… serves …` lines, then
 ```
 PASS v_candidate_profile hides soft-deleted rows (19000 of 20000 visible)
-PASS 4 history tables partitioned monthly (175 partitions ...)
+PASS the 4 Phase 1 history tables are partitioned monthly; 9 partitioned tables in all, 225 partitions ...
 PASS pipeline trigger wrote 39990 history rows for 39990 sample applications
 MILESTONE 5 CHECKS PASSED
 ```
@@ -176,21 +176,24 @@ Every test runs inside a transaction that is rolled back, so the database is unc
 
 | Milestone | Command | Pass signal |
 |---|---|---|
-| All | `./run_phase1.sh` | `VERIFIED: m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11 m12 m13`, exit 0 |
+| All | `./run_phase1.sh` | `VERIFIED: m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11 m12 m13 m14 m15 m16`, exit 0 |
 | M1 Provider | `./run_phase1.sh m1` | 3 PASS |
 | M2 Entities | `./run_phase1.sh m2` | 7 PASS, no orphan tables |
-| M3 Relationships | `./run_phase1.sh m3` | 33 relationships, 703 FKs explicit |
+| M3 Relationships | `./run_phase1.sh m3` | 33 relationships, 894 FKs explicit |
 | M4 Columns | `./run_phase1.sh m4` | 10 PASS |
 | M5 Design | `./run_phase1.sh m5` | 12 PASS, `MILESTONE 5 CHECKS PASSED` |
 | M6 Constraints | `./run_phase1.sh m6` | 45 PASS, `MILESTONE 6 CHECKS PASSED` |
 | M7 Entities (Phase 2) | `./run_phase1.sh m7` | 5 PASS — see [phase2-design.md](phase2-design.md#verification) |
-| M8 Relationships (Phase 2) | `./run_phase1.sh m8` | 33 relationships, 703 FKs explicit |
+| M8 Relationships (Phase 2) | `./run_phase1.sh m8` | 33 relationships, 894 FKs explicit |
 | M9 Columns (Phase 2) | `./run_phase1.sh m9` | 7 PASS |
 | M10 Constraints (Phase 2) | `./run_phase1.sh m10` | 60 PASS, `MILESTONE 10 CHECKS PASSED` |
 | M11 Entities (Phase 3) | `./run_phase1.sh m11` | 6 PASS — see [phase3-design.md](phase3-design.md#verification) |
-| M12 Relationships (Phase 3) | `./run_phase1.sh m12` | 40 relationships, 703 FKs explicit, 3 composite-FK rejections |
+| M12 Relationships (Phase 3) | `./run_phase1.sh m12` | 40 relationships, 894 FKs explicit, 3 composite-FK rejections |
 | M13 Columns (Phase 3) | `./run_phase1.sh m13` | 11 PASS |
+| M14 Constraints (Phase 3) | `./run_phase1.sh m14` | 75 PASS incl. the concurrent-login test, `MILESTONE 14 CHECKS PASSED` |
+| M15 Entities (Phase 4) | `./run_phase1.sh m15` | 8 PASS — see [phase4-design.md](phase4-design.md#verification) |
+| M16 Relationships (Phase 4) | `./run_phase1.sh m16` | 40 relationships, 894 FKs explicit, star-schema rules |
 
 If a check fails: the line before the error names the table, column or rule. Fix the DDL in `sql/0x_*.sql`, then re-run that milestone. A plain `./run_phase1.sh mN` always rebuilds from scratch.
 
-> Counts above reflect the full build (Phases 1–3). The runner builds every `sql/NN_*.sql` and runs every `sql/tests/mN_*.sql`.
+> Counts above reflect the full build (Phases 1–4 so far). The runner builds every `sql/NN_*.sql` and runs every `sql/tests/mN_*.sql`.

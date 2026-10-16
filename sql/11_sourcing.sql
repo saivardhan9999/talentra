@@ -11,7 +11,7 @@
 -- =============================================================================
 SET app.current_user_id = '1';
 
-CALL create_lookup_table('sourcing_request_status',   'requested, accepted, declined, withdrawn, expired');
+CALL create_lookup_table('sourcing_request_status',   'SYSTEM: 1=requested, 2=accepted, 3=declined, 4=withdrawn, 5=expired');
 CALL create_lookup_table('outreach_channel',          'email, sms, whatsapp, in_app');
 CALL create_lookup_table('outreach_batch_status',     'draft, queued, sending, completed, cancelled');
 CALL create_lookup_table('outreach_recipient_status', 'queued, sent, delivered, failed, responded, opted_out');
@@ -41,8 +41,15 @@ CREATE TABLE sourcing_request (
     CONSTRAINT uq_sourcing_request_id_job_requirement_id UNIQUE (id, job_requirement_id),
     CONSTRAINT ck_sourcing_request_proposed_fee_pct CHECK (proposed_fee_pct > 0 AND proposed_fee_pct <= 100),
     CONSTRAINT ck_sourcing_request_date_range CHECK (decided_at >= requested_at),
-    CONSTRAINT ck_sourcing_request_decision CHECK ((decided_at IS NULL) = (decided_by_user_account_id IS NULL))
+    CONSTRAINT ck_sourcing_request_decision CHECK ((decided_at IS NULL) = (decided_by_user_account_id IS NULL)),
+    -- a consultant asks for themselves; an accepted or declined request carries its decision
+    CONSTRAINT ck_sourcing_request_self_requested CHECK (consultant_user_account_id = created_by),
+    CONSTRAINT ck_sourcing_request_decided CHECK (sourcing_request_status_id NOT IN (1, 2, 3)
+        OR (sourcing_request_status_id = 1) = (decided_at IS NULL))
 );
+-- One live (requested or accepted) request per consultant and requirement.
+CREATE UNIQUE INDEX uq_sourcing_request_job_requirement_id_consultant_live ON sourcing_request (job_requirement_id, consultant_user_account_id)
+    WHERE sourcing_request_status_id IN (1, 2);
 CREATE INDEX idx_sourcing_request_job_requirement_id ON sourcing_request (job_requirement_id, sourcing_request_status_id);
 CREATE INDEX idx_sourcing_request_consultant_user_account_id ON sourcing_request (consultant_user_account_id, requested_at DESC);
 
@@ -95,6 +102,155 @@ CREATE TABLE outreach_recipient (
     CONSTRAINT ck_outreach_recipient_date_range CHECK (delivered_at >= sent_at AND responded_at >= sent_at)
 );
 CREATE INDEX idx_outreach_recipient_candidate_profile_id ON outreach_recipient (candidate_profile_id);
+
+-- -----------------------------------------------------------------------------
+-- M14 (B46) rules: a consultant acts only on a requirement open to consultants.
+-- "Open" = is_open_to_consultants, status open, not deleted; read with definer rights
+-- so the rule does not depend on what row-level security lets the actor see.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app_job_open_to_consultants(p_job_requirement_id bigint) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    SELECT EXISTS (SELECT 1 FROM job_requirement WHERE id = p_job_requirement_id AND is_open_to_consultants
+                   AND job_requirement_status_id = 3 AND deleted_at IS NULL)
+$$;
+
+CREATE OR REPLACE FUNCTION trg_sourcing_request_rules() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE v_actor bigint := app_current_user_id();
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.sourcing_request_status_id <> 1 OR NEW.decided_at IS NOT NULL THEN
+            RAISE EXCEPTION 'a sourcing request starts as requested, undecided';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM user_account_role WHERE user_account_id = NEW.consultant_user_account_id
+                       AND role_id = 8 AND revoked_at IS NULL) THEN
+            RAISE EXCEPTION 'user % is not a consultant', NEW.consultant_user_account_id;
+        END IF;
+        IF NOT app_job_open_to_consultants(NEW.job_requirement_id) THEN
+            RAISE EXCEPTION 'job requirement % is not open to consultants', NEW.job_requirement_id;
+        END IF;
+        RETURN NEW;
+    END IF;
+    IF NEW.job_requirement_id <> OLD.job_requirement_id OR NEW.consultant_user_account_id <> OLD.consultant_user_account_id THEN
+        RAISE EXCEPTION 'sourcing request % cannot move to another requirement or consultant', OLD.id;
+    END IF;
+    IF NEW.sourcing_request_status_id = OLD.sourcing_request_status_id THEN RETURN NEW; END IF;
+    -- requested -> accepted | declined | withdrawn | expired; accepted -> withdrawn; the rest is final
+    IF OLD.sourcing_request_status_id NOT IN (1, 2) OR (OLD.sourcing_request_status_id = 2 AND NEW.sourcing_request_status_id <> 4) THEN
+        RAISE EXCEPTION 'sourcing request % cannot go from status % to %', OLD.id, OLD.sourcing_request_status_id, NEW.sourcing_request_status_id;
+    END IF;
+    IF NEW.sourcing_request_status_id IN (2, 3) THEN
+        IF NOT EXISTS (SELECT 1 FROM job_requirement j WHERE j.id = NEW.job_requirement_id
+                       AND j.organisation_id IN (SELECT app_organisation_ids_with('job_requirement.manage'))) THEN
+            RAISE EXCEPTION 'only the requirement''s employer can accept or decline sourcing request %', OLD.id;
+        END IF;
+        IF NEW.sourcing_request_status_id = 2 AND NOT app_job_open_to_consultants(NEW.job_requirement_id) THEN
+            RAISE EXCEPTION 'job requirement % is no longer open to consultants', NEW.job_requirement_id;
+        END IF;
+        NEW.decided_at := now();
+        NEW.decided_by_user_account_id := v_actor;
+    ELSIF NEW.sourcing_request_status_id = 4 AND v_actor IS DISTINCT FROM NEW.consultant_user_account_id THEN
+        RAISE EXCEPTION 'only the consultant can withdraw sourcing request %', OLD.id;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_sourcing_request_rules BEFORE INSERT OR UPDATE ON sourcing_request
+    FOR EACH ROW EXECUTE FUNCTION trg_sourcing_request_rules();
+
+-- Acting under a request (shortlisting, outreach) needs an accepted request, by its
+-- own consultant, on a requirement that is still open to consultants.
+CREATE OR REPLACE FUNCTION app_assert_sourcing_request_actor(p_sourcing_request_id bigint, p_actor bigint) RETURNS void
+LANGUAGE plpgsql AS $$
+DECLARE r sourcing_request;
+BEGIN
+    SELECT * INTO r FROM sourcing_request WHERE id = p_sourcing_request_id;
+    IF r.sourcing_request_status_id <> 2 OR r.consultant_user_account_id <> p_actor THEN
+        RAISE EXCEPTION 'sourcing request % is not an accepted request of user %', p_sourcing_request_id, p_actor;
+    END IF;
+    IF NOT app_job_open_to_consultants(r.job_requirement_id) THEN
+        RAISE EXCEPTION 'job requirement % is no longer open to consultants', r.job_requirement_id;
+    END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION trg_talent_list_sourcing_rules() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.sourcing_request_id IS NOT NULL AND (TG_OP = 'INSERT' OR NEW.sourcing_request_id IS DISTINCT FROM OLD.sourcing_request_id) THEN
+        PERFORM app_assert_sourcing_request_actor(NEW.sourcing_request_id, NEW.owner_user_account_id);
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_talent_list_sourcing_rules BEFORE INSERT OR UPDATE OF sourcing_request_id, owner_user_account_id ON talent_list
+    FOR EACH ROW EXECUTE FUNCTION trg_talent_list_sourcing_rules();
+
+CREATE OR REPLACE FUNCTION trg_talent_list_entry_sourcing_rules() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE v_request bigint;
+BEGIN
+    SELECT sourcing_request_id INTO v_request FROM talent_list WHERE id = NEW.talent_list_id;
+    IF v_request IS NOT NULL THEN
+        PERFORM app_assert_sourcing_request_actor(v_request, NEW.added_by_user_account_id);
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_talent_list_entry_sourcing_rules BEFORE INSERT ON talent_list_entry
+    FOR EACH ROW EXECUTE FUNCTION trg_talent_list_entry_sourcing_rules();
+
+-- Outreach for a requirement: either by a current member of its organisation, or by
+-- the consultant of an accepted request.
+CREATE OR REPLACE FUNCTION trg_outreach_batch_rules() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.sourcing_request_id IS NOT NULL THEN
+        PERFORM app_assert_sourcing_request_actor(NEW.sourcing_request_id, NEW.sender_user_account_id);
+    ELSIF NEW.job_requirement_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM job_requirement j JOIN organisation_member m ON m.organisation_id = j.organisation_id
+        WHERE j.id = NEW.job_requirement_id AND m.user_account_id = NEW.sender_user_account_id
+          AND m.valid_from <= now() AND (m.valid_to IS NULL OR m.valid_to > now())) THEN
+        RAISE EXCEPTION 'outreach for job requirement % needs membership of its organisation or an accepted sourcing request',
+            NEW.job_requirement_id;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_outreach_batch_rules BEFORE INSERT OR UPDATE OF sourcing_request_id, job_requirement_id, sender_user_account_id ON outreach_batch
+    FOR EACH ROW EXECUTE FUNCTION trg_outreach_batch_rules();
+
+-- -----------------------------------------------------------------------------
+-- M14 (B47, M12 deviation): a consumption entry pays for exactly one thing (download,
+-- view or outreach batch) of the paying organisation. The partitioned history tables
+-- cannot carry a unique index on the entry, so an advisory lock on the entry id
+-- serialises two charges of the same entry and the second one sees the first.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION trg_credit_charge_rules() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    r       jsonb  := to_jsonb(NEW);
+    v_entry bigint := (r ->> 'wallet_ledger_entry_id')::bigint;
+    v_org   bigint := coalesce(r ->> 'downloader_organisation_id', r ->> 'viewer_organisation_id', r ->> 'organisation_id')::bigint;
+BEGIN
+    IF v_entry IS NULL OR (TG_OP = 'UPDATE' AND v_entry IS NOT DISTINCT FROM (to_jsonb(OLD) ->> 'wallet_ledger_entry_id')::bigint) THEN
+        RETURN NEW;
+    END IF;
+    PERFORM pg_advisory_xact_lock(v_entry);
+    IF NOT EXISTS (SELECT 1 FROM wallet_ledger_entry e JOIN wallet w ON w.id = e.wallet_id
+                   WHERE e.id = v_entry AND e.wallet_entry_type_id = 2 AND w.organisation_id = v_org) THEN
+        RAISE EXCEPTION 'ledger entry % is not a consumption from the acting organisation''s wallet', v_entry;
+    END IF;
+    IF EXISTS (SELECT 1 FROM profile_download_event WHERE wallet_ledger_entry_id = v_entry)
+       OR EXISTS (SELECT 1 FROM profile_view_event WHERE wallet_ledger_entry_id = v_entry)
+       OR EXISTS (SELECT 1 FROM outreach_batch WHERE wallet_ledger_entry_id = v_entry AND id <> (r ->> 'id')::bigint) THEN
+        RAISE EXCEPTION 'ledger entry % already paid for another download, view or outreach', v_entry;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_profile_download_event_credit BEFORE INSERT ON profile_download_event
+    FOR EACH ROW EXECUTE FUNCTION trg_credit_charge_rules();
+CREATE TRIGGER trg_profile_view_event_credit BEFORE INSERT ON profile_view_event
+    FOR EACH ROW EXECUTE FUNCTION trg_credit_charge_rules();
+CREATE TRIGGER trg_outreach_batch_credit BEFORE INSERT OR UPDATE OF wallet_ledger_entry_id ON outreach_batch
+    FOR EACH ROW EXECUTE FUNCTION trg_credit_charge_rules();
+CREATE INDEX idx_profile_download_event_wallet_ledger_entry_id ON profile_download_event (wallet_ledger_entry_id) WHERE wallet_ledger_entry_id IS NOT NULL;
+CREATE INDEX idx_profile_view_event_wallet_ledger_entry_id ON profile_view_event (wallet_ledger_entry_id) WHERE wallet_ledger_entry_id IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
 -- Classification and nullability justification (rule groups 5, 6)

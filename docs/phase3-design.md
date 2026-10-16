@@ -1,7 +1,7 @@
 # Talentra — Phase 3 Design (Individual modules)
 
-**Scope so far:** Milestones 11–13, backlogs B36–B44. Modules: **Licences, seats, devices and sessions** (Member A), **Sourcing and consultant requests** (Member B), **Subscriptions, wallet, payments and download history** (Member C).
-**Status:** M11–M13 built and verified on PostgreSQL 16 (`./run_phase1.sh m11`, `m12`, `m13`). M14 (keys and constraints: device limit under concurrent logins, consultant-only-on-open requirements, non-overlapping subscription periods, ledger rules) is next.
+**Scope:** Milestones 11–14, backlogs B36–B47 (Phase 3 complete). Modules: **Licences, seats, devices and sessions** (Member A), **Sourcing and consultant requests** (Member B), **Subscriptions, wallet, payments and download history** (Member C).
+**Status:** M11–M14 built and verified on PostgreSQL 16 (`./run_phase1.sh m11` … `m14`).
 
 | File | Contents |
 |---|---|
@@ -13,7 +13,7 @@
 
 Build order follows dependencies, not the docket's module order: Subscriptions (09) before Licences (10), because a licence is granted by a subscription. Sourcing (11) goes last because outreach references the wallet ledger.
 
-Like Phase 2, the tables are created with their columns and foreign keys so the schema-wide M4/M9 column rules keep passing. The M14 deliverable (behavioural constraints) is still to do.
+Like Phase 2, the tables are created with their columns and foreign keys so the schema-wide M4/M9 column rules keep passing. The M14 rules are triggers, exclusion constraints and CHECKs added in the same files.
 
 ---
 
@@ -29,7 +29,7 @@ Like Phase 2, the tables are created with their columns and foreign keys so the 
 | `login_attempt` | Login history incl. refused attempts (`device_limit_reached`, `seat_unavailable` …); append-only, monthly partitions |
 | `session_revocation_event` | Revoking a session or a device is an auditable event (rule group 9); append-only |
 
-**Decision D15 — one session table.** The docket lists "sessions (identity only)" under Administration and the Phase 4 shared items (B50), and "active sessions" here. One login produces one session, so there is one `user_session` table. Users who need no licence (candidates, gig workers) have `licence_seat_id` NULL, and the device limit still applies through their devices. B50 reuses this table.
+**Decision D15 — one session table.** The docket lists "sessions (identity only)" under Administration and the Phase 4 shared items (B50), and "active sessions" here. One login produces one session, so there is one `user_session` table. Users who need no licence (candidates, gig workers) have `licence_seat_id` NULL and no device limit (the limit is per licence); revocation and login history still apply. B50 reuses this table.
 
 ### B37 Sourcing and consultant requests (Member B)
 | Entity | Purpose |
@@ -48,7 +48,7 @@ Like Phase 2, the tables are created with their columns and foreign keys so the 
 | `plan` | Sellable plan: billing period, price, licence limits |
 | `plan_entitlement` | Quantity per period of each entitlement (job postings, profile downloads, outreach messages, featured jobs); NULL = unlimited |
 | `subscription` | An account's purchase of a plan: status, auto-renew, cancellation (time, reason) |
-| `subscription_period` | First term and every renewal (`renewal_number`), with the paying order; non-overlap per subscription/licence comes in M14 |
+| `subscription_period` | First term and every renewal (`renewal_number`), with the paying order; periods never overlap (M14) |
 | `payment_order` | What the platform asked the gateway to collect: purpose (subscription / wallet recharge), amount, status, gateway order reference (idempotency) |
 | `payment_event` | Gateway callbacks as received: status history, idempotent by gateway event id; append-only |
 | `invoice` | One per paid order; immutable (append-only), total = subtotal + tax |
@@ -64,7 +64,7 @@ Like Phase 2, the tables are created with their columns and foreign keys so the 
 | Section 4 item | Entity |
 |---|---|
 | Subscription licences, users allowed per licence, devices allowed per user, seat allocation | `licence`, `licence_seat` |
-| Registered devices, active sessions, login history, device-limit rule | `user_device`, `user_session`, `login_attempt` (rule enforced in M14) |
+| Registered devices, active sessions, login history, device-limit rule | `user_device`, `user_session`, `login_attempt` (rule enforced in M14 under concurrency) |
 | Revocation | `session_revocation_event`, `user_device.revoked_at`, `user_session.ended_at` |
 | Sourcing requests, acceptance or decline, candidate shortlists | `sourcing_request`, `talent_list.sourcing_request_id` |
 | Bulk outreach (§2 workflow) | `outreach_batch`, `outreach_recipient` |
@@ -156,7 +156,7 @@ erDiagram
 
 PostgreSQL checks a composite FK only when every column is set (MATCH SIMPLE). Where one column can be NULL on its own, a CHECK closes the gap (`ck_login_attempt_device_needs_user`, `ck_outreach_batch_sourcing_request`), or a single-column FK keeps the lone column checked (`session_revocation_event.user_session_id`).
 
-**Deviation — credit link on partitioned history.** `profile_download_event` and `profile_view_event` are partitioned. PostgreSQL requires a unique index on a partitioned table to include the partition key, so "one ledger entry pays for one download" cannot be a unique constraint. M14 decides between enforcing it with a trigger and accepting it, since the debit is written in the same transaction as the event.
+**Deviation — credit link on partitioned history.** `profile_download_event` and `profile_view_event` are partitioned. PostgreSQL requires a unique index on a partitioned table to include the partition key, so "one ledger entry pays for one download" cannot be a unique constraint. M14 enforces it with a trigger and an advisory lock instead (see B47).
 
 ## Milestone 13 — Columns (B42–B44)
 
@@ -183,6 +183,93 @@ Full column list with type, nullability, class, FK and null justification: **[`d
 
 **Column contents required by rule groups 9 and 10** (asserted by m13): sessions store device, start, last activity and end. Download and view history store actor, subject, timestamp and the credit deduction.
 
+## Milestone 14 — Keys and constraints (B45–B47)
+
+### B45 Licences: seat and device limits under concurrency (rule groups 2 and 9)
+
+**Mechanism (the design statement rule group 2 asks for): row locks taken inside the database, not application checks.**
+
+| Rule | Mechanism |
+|---|---|
+| Live seats ≤ `max_users` | `trg_licence_seat_rules`: `SELECT … FROM licence … FOR UPDATE`, then count live seats. Concurrent seat assignments on one licence queue behind the lock |
+| Seat holders belong to the licensed organisation; seats only on an active licence | same trigger (live `organisation_member`, `licence_status` 1) |
+| **Live sessions ≤ `max_devices_per_user`, enforced at login** | `trg_user_session_rules`: `SELECT … FROM licence_seat … FOR UPDATE`, then count live sessions on the seat. Two simultaneous logins by one user queue, and the second counts the first one's committed session |
+| A licensed user cannot dodge the limit by leaving the seat out | the trigger fills `licence_seat_id` with the user's live seat |
+| **How an active session is counted** | `ended_at IS NULL AND expires_at > now()`, served by `idx_user_session_user_account_id_live` |
+| **How a session is released** | logout (`ended_at` + reason `logout`), revocation (`app_revoke_session`, `app_revoke_device`, seat release), or passing `expires_at`. An ended session cannot be reopened (trigger) |
+| **Exceeding the limit is recorded in the audit trail** | Login goes through `app_open_session()`. At the limit it does not raise: it writes `login_attempt` (outcome `device_limit_reached`) and an `audit_event` (`login_failed`, detail: reason, active sessions, limit), then returns NULL. A raised error would roll the record back. The insert trigger stays as the backstop for any direct insert |
+| Revoking a device or session is auditable | `session_revocation_event` (append-only; `created_by` = who revoked). Revoking a device ends its live sessions (trigger), and releasing a seat ends its sessions as `seat_released` revocations. `licence`, `licence_seat` and `user_device` changes also go to `audit_event` |
+| A revoked device stays revoked | trigger; the same fingerprint can register again (partial unique on live devices) |
+
+**Users without a licence** (candidates, gig workers) have no seat and therefore no device limit; D15 is corrected accordingly.
+
+**Isolation level.** The locks make this correct at READ COMMITTED (the PostgreSQL default, used by the application) and at SERIALIZABLE. Under REPEATABLE READ the second login would count with its old snapshot; the seat row would then have to be updated, not just locked. This is marked `ponytail:` in `10_licences.sql`.
+
+**Proof under real concurrency.** Part 2 of `m14_constraints.sql` opens two dblink connections against a licence with `max_devices_per_user = 1`:
+1. Connection 1 logs in inside an open transaction.
+2. Connection 2 logs the same user in on another device at the same time.
+3. The test asserts that connection 2 is still blocked after one second, and that after connection 1 commits, connection 2 returns no session.
+4. It ends with exactly one live session and one `device_limit_reached` attempt recorded.
+
+With the `FOR UPDATE` removed, the test fails with "second concurrent login did not wait".
+
+### B46 Sourcing: a consultant acts only on a requirement open to consultants
+
+"Open to consultants" means `is_open_to_consultants`, status `open` and not deleted. `app_job_open_to_consultants()` reads it with definer rights, so the rule does not depend on what row-level security shows the actor.
+
+| Rule | Mechanism |
+|---|---|
+| Only consultants request, only for themselves, only on open requirements | `trg_sourcing_request_rules` (live `consultant` role grant) + `ck_sourcing_request_self_requested` |
+| One live request per consultant and requirement | partial unique on status `requested`/`accepted` |
+| Only the requirement's employer accepts or declines; the decision is final | trigger checks `app_organisation_ids_with('job_requirement.manage')` (so recruiters and the consultant cannot) and records `decided_at` / `decided_by` itself. Transitions: requested → accepted / declined / withdrawn / expired; accepted → withdrawn |
+| **Acting** (shortlist, shortlist entries, outreach) needs an accepted request, by its consultant, on a requirement that is **still** open | `app_assert_sourcing_request_actor()` from triggers on `talent_list`, `talent_list_entry` and `outreach_batch`. Closing the requirement to consultants stops further work at once |
+| Outreach for a requirement without a request comes from a current member of its organisation | `trg_outreach_batch_rules` |
+
+### B47 Subscriptions, wallet, payments and download history
+
+| Rule | Mechanism |
+|---|---|
+| **Subscription periods never overlap for the same licence** (rule group 10) | `uq_subscription_period_no_overlap EXCLUDE USING gist (subscription_id =, tstzrange(period_start_at, period_end_at) &&)`. A licence is 1 : 1 with its subscription (unique `licence.subscription_id`), so per subscription is per licence. Back-to-back terms are allowed (half-open ranges) |
+| A paid period is paid by a paid subscription order of the subscriber | trigger |
+| **Ledger is append-only; a correction is a new entry referencing the original** | append-only trigger + privileges (M10). A reversal must negate exactly one non-reversal entry of the same wallet, at most once (unique `reverses_…`) |
+| Balance moves only through the ledger and never goes negative | the ledger trigger locks the wallet row (`FOR UPDATE`), computes `balance_after` and updates the cached balance. A wallet starts at 0, and a direct balance edit is rejected (`pg_trigger_depth()` guard). Concurrent debits queue, so no overdraft |
+| Entry type fixes sign and reference | CHECKs: recharge > 0 with a payment order; consumption, refund and expiry < 0; refund ⇔ `refund_id`; reversal ⇔ `reverses_…` |
+| A recharge credits exactly what was bought | trigger: paid wallet-recharge order of the wallet's organisation, `credit_delta = credit_quantity` (M13 column), at most once (unique) |
+| Refunds never exceed the payment | `trg_refund_rules` locks the order row and sums non-failed refunds; paid orders only; same currency |
+| Invoices bill a paid order exactly | trigger: total and currency equal the order's |
+| Download/view history carries the credit deduction, **one deduction per charge** | `trg_credit_charge_rules` on downloads, views and outreach: the entry must be a consumption from the acting organisation's wallet and not already used. An advisory lock on the entry id serialises two charges of the same entry. This resolves the M12 deviation without a unique index on the partitioned tables |
+
+**Bug found by the M14 tests.** The M13 CHECK on `payment_order.credit_quantity` let a wallet recharge with no quantity through. The expression evaluated to NULL, and a NULL CHECK result counts as a pass. It is now written to evaluate to false in that case: `(purpose = 2) = (credit_quantity IS NOT NULL) AND credit_quantity > 0`.
+
+### Validation evidence (B45–B47)
+`m14_constraints.sql` runs 73 behavioural checks in one rolled-back transaction, plus the two-connection concurrency test (2 more; 75 PASS lines in total). Each `PASS rejected:` line names the constraint or trigger message that blocked the action. Mutation-tested: removing the seat `FOR UPDATE` locks fails the concurrency test; dropping `uq_subscription_period_no_overlap` fails the overlap test; making `app_job_open_to_consultants()` always true fails the consultant test.
+
+### Deviation register (Phase 3)
+
+| Rule | Deviation | Reason | Risk / mitigation |
+|---|---|---|---|
+| 2 — CHECK with lookup values | Ledger, order and sourcing rules use SYSTEM lookup ids (marked `SYSTEM:` in each lookup comment) | A CHECK cannot look up a code | Ids < 1000 reserved; system codes immutable (Phase 1 trigger) |
+| 1 — PK named `id` | `login_attempt`, `profile_download_event` PK `(id, time)` | Partition key must be in the PK | Same as Phase 1 history tables |
+| 2 — unique constraints | "One deduction per charge" on partitioned history is a trigger + advisory lock, not a unique index | PostgreSQL unique indexes on partitioned tables must include the partition key | Trigger tested; lock serialises concurrent charges |
+| 9 — device limit | Users without a licence have no device limit | The limit is defined per licence | Revocation and login history still apply to them |
+| Concurrency | Seat and device locks assume READ COMMITTED or SERIALIZABLE | Updating the seat row on every login would also audit every login | `ponytail:` comment names the upgrade path |
+| 10 — refunds | A refund's ledger debit is not tied to the refunded amount in credits | Credit price can change between recharge and refund (D17) | The debit references the refund; finance reconciles by the refund id |
+
+### Rule compliance (Phase 3 scope)
+
+| Rule group | Complies | Notes |
+|---|---|---|
+| 1 Naming | Yes | Automated (m4) |
+| 2 Keys and constraints | Yes, with deviations above | Composite FKs (D18), exclusion constraint, row locks for limits; mechanism stated above |
+| 3 Standard domains | Yes | Automated (m13) |
+| 4 Audit and lifecycle | Yes | Ledger, payment events, invoices, login attempts, revocations and downloads are append-only; licence, seat and device changes audited |
+| 5 Nullability | Yes | Automated (m4) |
+| 6 Classification | Yes | Sensitive = hashes only (m13) |
+| 7 Multilingual | Yes | Plan and lookup labels are keys |
+| 8 Physical naming | Yes | `<table>_pYYYYMM` partitions |
+| 9 Licensing | Yes | Explicit positive limits; device limit at login under concurrency; refused attempts audited; revocation auditable |
+| 10 Money / history | Yes | Append-only ledgers with reversals; non-overlapping periods by exclusion; history carries actor, subject, time, deduction |
+
 ---
 
 ## Verification
@@ -195,6 +282,7 @@ Expected: `licences : 6`, `sourcing : 3`, `subscriptions : 11` entities present,
 ```sh
 MSYS_NO_PATHCONV=1 ./run_phase1.sh m12
 MSYS_NO_PATHCONV=1 ./run_phase1.sh m13
+MSYS_NO_PATHCONV=1 ./run_phase1.sh m14
 ```
 m12 expected output:
 - `PASS 40 documented relationships …`;
@@ -209,3 +297,5 @@ Mutation-tested: replacing the session/device composite FK with a plain FK makes
 - [ ] D16 (decision on the request) and D17 (credits vs money) are acceptable to the panel narrative.
 - [ ] Every row of the coverage table maps to an entity.
 - [ ] D18 (composite FKs) and the partitioned-history credit-link deviation are agreed.
+- [ ] The application connects at READ COMMITTED and logs in through `app_open_session()`.
+- [ ] Phase 3 deviation register accepted.

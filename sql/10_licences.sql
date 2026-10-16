@@ -9,11 +9,11 @@
 -- =============================================================================
 SET app.current_user_id = '1';
 
-CALL create_lookup_table('licence_status',     'active, suspended, expired, cancelled');
+CALL create_lookup_table('licence_status',     'SYSTEM: 1=active; suspended, expired, cancelled');
 CALL create_lookup_table('device_platform',    'web, android, ios, windows, macos, linux');
-CALL create_lookup_table('session_end_reason', 'logout, idle_timeout, expired, revoked');
-CALL create_lookup_table('login_outcome',      'success, invalid_credentials, account_locked, device_limit_reached, seat_unavailable, licence_inactive');
-CALL create_lookup_table('revocation_reason',  'user_request, admin_action, device_lost, security_incident, seat_released');
+CALL create_lookup_table('session_end_reason', 'SYSTEM: 1=logout, 2=idle_timeout, 3=expired, 4=revoked');
+CALL create_lookup_table('login_outcome',      'SYSTEM: 1=success, 2=invalid_credentials, 3=account_locked, 4=device_limit_reached, 5=seat_unavailable, 6=licence_inactive');
+CALL create_lookup_table('revocation_reason',  'SYSTEM: 1=user_request, 2=admin_action, 3=device_lost, 4=security_incident, 5=seat_released');
 
 CALL seed_lookups('licence_status', ARRAY['active|Active', 'suspended|Suspended', 'expired|Expired', 'cancelled|Cancelled']);
 CALL seed_lookups('device_platform', ARRAY['web|Web browser', 'android|Android', 'ios|iOS', 'windows|Windows', 'macos|macOS', 'linux|Linux']);
@@ -77,11 +77,12 @@ CREATE TABLE user_device (
     created_by              bigint       NOT NULL DEFAULT app_current_user_id() REFERENCES user_account (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     updated_at              timestamptz  NOT NULL DEFAULT now(),
     updated_by              bigint       NOT NULL DEFAULT app_current_user_id() REFERENCES user_account (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT uq_user_device_user_account_id_fingerprint UNIQUE (user_account_id, device_fingerprint_hmac),
     -- target of the session / login composite FKs: a session runs on a device of its own user
     CONSTRAINT uq_user_device_id_user_account_id UNIQUE (id, user_account_id),
     CONSTRAINT ck_user_device_date_range CHECK (last_seen_at >= first_seen_at AND revoked_at >= first_seen_at)
 );
+-- One live registration per fingerprint and user; a revoked device can be registered again.
+CREATE UNIQUE INDEX uq_user_device_user_account_id_fingerprint ON user_device (user_account_id, device_fingerprint_hmac) WHERE revoked_at IS NULL;
 
 -- One row per login. Expired or revoked sessions (ended_at set) do not count
 -- against the device limit (rule group 9).
@@ -154,6 +155,167 @@ CREATE TABLE session_revocation_event (
 );
 CREATE INDEX idx_session_revocation_event_user_device_id ON session_revocation_event (user_device_id) WHERE user_device_id IS NOT NULL;
 CALL make_append_only('session_revocation_event');
+
+-- -----------------------------------------------------------------------------
+-- M14 (B45) rules (rule groups 2 and 9).
+-- Seat limit: assigning a seat locks the licence row, so concurrent assignments
+--   queue and live seats never exceed max_users.
+-- Device limit, enforced at login: opening a session locks the user's seat row, so
+--   two concurrent logins of one user queue and the second counts the first.
+--   A session counts while ended_at IS NULL and expires_at > now(). It is released
+--   by logout or revocation (ended_at set) or by passing expires_at. Users without a
+--   seat (candidates, gig workers) hold no licence and have no device limit.
+-- ponytail: correct at READ COMMITTED (default) and SERIALIZABLE; REPEATABLE READ
+--   would need the seat row updated, not just locked.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION trg_licence_seat_rules() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE l licence; v_live int;
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        IF NEW.licence_id <> OLD.licence_id OR NEW.user_account_id <> OLD.user_account_id
+           OR (OLD.released_at IS NOT NULL AND NEW.released_at IS DISTINCT FROM OLD.released_at) THEN
+            RAISE EXCEPTION 'seat % is history: only releasing a live seat is allowed', OLD.id;
+        END IF;
+        RETURN NEW;
+    END IF;
+    SELECT * INTO l FROM licence WHERE id = NEW.licence_id FOR UPDATE;
+    IF l.licence_status_id <> 1 THEN RAISE EXCEPTION 'licence % is not active', l.id; END IF;
+    IF NOT EXISTS (SELECT 1 FROM organisation_member m WHERE m.organisation_id = l.organisation_id
+                   AND m.user_account_id = NEW.user_account_id AND m.valid_from <= now() AND (m.valid_to IS NULL OR m.valid_to > now())) THEN
+        RAISE EXCEPTION 'user % is not a current member of the organisation of licence %', NEW.user_account_id, l.id;
+    END IF;
+    SELECT count(*) INTO v_live FROM licence_seat WHERE licence_id = l.id AND released_at IS NULL;
+    IF NEW.released_at IS NULL AND v_live >= l.max_users THEN
+        RAISE EXCEPTION 'licence % has no free seat (% of % in use)', l.id, v_live, l.max_users;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_licence_seat_rules BEFORE INSERT OR UPDATE ON licence_seat
+    FOR EACH ROW EXECUTE FUNCTION trg_licence_seat_rules();
+
+-- Releasing a seat ends its sessions; each is an auditable revocation.
+CREATE OR REPLACE FUNCTION trg_licence_seat_released() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    WITH ended AS (
+        UPDATE user_session SET ended_at = now(), session_end_reason_id = 4
+        WHERE licence_seat_id = NEW.id AND ended_at IS NULL RETURNING id, user_device_id)
+    INSERT INTO session_revocation_event (user_session_id, user_device_id, revocation_reason_id)
+    SELECT id, user_device_id, 5 FROM ended;
+    RETURN NULL;
+END $$;
+CREATE TRIGGER trg_licence_seat_released AFTER UPDATE OF released_at ON licence_seat
+    FOR EACH ROW WHEN (OLD.released_at IS NULL AND NEW.released_at IS NOT NULL) EXECUTE FUNCTION trg_licence_seat_released();
+
+CREATE OR REPLACE FUNCTION trg_user_session_rules() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE l licence; v_live int;
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        IF NEW.user_account_id <> OLD.user_account_id OR NEW.user_device_id <> OLD.user_device_id
+           OR NEW.licence_seat_id IS DISTINCT FROM OLD.licence_seat_id OR NEW.started_at <> OLD.started_at
+           OR (OLD.ended_at IS NOT NULL AND NEW.ended_at IS DISTINCT FROM OLD.ended_at) THEN
+            RAISE EXCEPTION 'session %: only activity, expiry and ending may change; an ended session stays ended', OLD.id;
+        END IF;
+        RETURN NEW;
+    END IF;
+    IF EXISTS (SELECT 1 FROM user_device WHERE id = NEW.user_device_id AND revoked_at IS NOT NULL) THEN
+        RAISE EXCEPTION 'device % is revoked', NEW.user_device_id;
+    END IF;
+    -- a licensed user always logs in on a seat, so leaving the seat out cannot bypass the limit
+    -- ponytail: a user with live seats on two licences is placed on the lowest seat id
+    IF NEW.licence_seat_id IS NULL THEN
+        SELECT id INTO NEW.licence_seat_id FROM licence_seat
+        WHERE user_account_id = NEW.user_account_id AND released_at IS NULL ORDER BY id LIMIT 1;
+    END IF;
+    IF NEW.licence_seat_id IS NOT NULL THEN
+        PERFORM 1 FROM licence_seat WHERE id = NEW.licence_seat_id AND released_at IS NULL FOR UPDATE;
+        IF NOT FOUND THEN RAISE EXCEPTION 'seat % is released', NEW.licence_seat_id; END IF;
+        SELECT l2.* INTO l FROM licence l2 JOIN licence_seat s ON s.licence_id = l2.id WHERE s.id = NEW.licence_seat_id;
+        IF l.licence_status_id <> 1 THEN RAISE EXCEPTION 'licence % is not active', l.id; END IF;
+        SELECT count(*) INTO v_live FROM user_session
+        WHERE licence_seat_id = NEW.licence_seat_id AND ended_at IS NULL AND expires_at > now();
+        IF v_live >= l.max_devices_per_user THEN
+            RAISE EXCEPTION 'device limit reached: user % has % active session(s), licence % allows %',
+                NEW.user_account_id, v_live, l.id, l.max_devices_per_user;
+        END IF;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_user_session_rules BEFORE INSERT OR UPDATE ON user_session
+    FOR EACH ROW EXECUTE FUNCTION trg_user_session_rules();
+
+-- A revoked device stays revoked (register it again) and its live sessions end at once.
+CREATE OR REPLACE FUNCTION trg_user_device_rules() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.user_account_id <> OLD.user_account_id OR NEW.device_fingerprint_hmac <> OLD.device_fingerprint_hmac
+       OR (OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS DISTINCT FROM OLD.revoked_at) THEN
+        RAISE EXCEPTION 'device %: identity cannot change and a revoked device stays revoked', OLD.id;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_user_device_rules BEFORE UPDATE ON user_device
+    FOR EACH ROW EXECUTE FUNCTION trg_user_device_rules();
+CREATE OR REPLACE FUNCTION trg_user_device_revoked() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    UPDATE user_session SET ended_at = now(), session_end_reason_id = 4 WHERE user_device_id = NEW.id AND ended_at IS NULL;
+    RETURN NULL;
+END $$;
+CREATE TRIGGER trg_user_device_revoked AFTER UPDATE OF revoked_at ON user_device
+    FOR EACH ROW WHEN (OLD.revoked_at IS NULL AND NEW.revoked_at IS NOT NULL) EXECUTE FUNCTION trg_user_device_revoked();
+
+-- Login entry point. Opens a session, or records the refused attempt in the login
+-- history and the audit trail and returns NULL (no exception, so the record survives).
+-- The direct-insert trigger above stays as the backstop.
+CREATE OR REPLACE FUNCTION app_open_session(p_user_account_id bigint, p_user_device_id bigint, p_identifier_hmac bytea,
+    p_session_token_hash bytea, p_expires_at timestamptz, p_source_ip inet DEFAULT NULL, p_user_agent varchar DEFAULT NULL)
+RETURNS bigint LANGUAGE plpgsql AS $$
+DECLARE v_seat bigint; l licence; v_live int := 0; v_outcome bigint; v_session bigint;
+BEGIN
+    SELECT id INTO v_seat FROM licence_seat WHERE user_account_id = p_user_account_id AND released_at IS NULL
+    ORDER BY id LIMIT 1 FOR UPDATE;
+    IF v_seat IS NOT NULL THEN
+        SELECT l2.* INTO l FROM licence l2 JOIN licence_seat s ON s.licence_id = l2.id WHERE s.id = v_seat;
+        SELECT count(*) INTO v_live FROM user_session WHERE licence_seat_id = v_seat AND ended_at IS NULL AND expires_at > now();
+        v_outcome := CASE WHEN l.licence_status_id <> 1 THEN 6 WHEN v_live >= l.max_devices_per_user THEN 4 END;
+    END IF;
+    IF v_outcome IS NULL THEN
+        INSERT INTO user_session (user_account_id, user_device_id, licence_seat_id, session_token_hash, expires_at, created_by, updated_by)
+        VALUES (p_user_account_id, p_user_device_id, v_seat, p_session_token_hash, p_expires_at, p_user_account_id, p_user_account_id)
+        RETURNING id INTO v_session;
+    ELSE
+        INSERT INTO audit_event (audit_action_id, target_table, organisation_id, source_ip, user_agent, detail, created_by)
+        SELECT a.id, 'user_session', l.organisation_id, p_source_ip, p_user_agent,
+               jsonb_build_object('reason', o.code, 'active_sessions', v_live, 'max_devices_per_user', l.max_devices_per_user),
+               p_user_account_id
+        FROM audit_action a, login_outcome o WHERE a.code = 'login_failed' AND o.id = v_outcome;
+    END IF;
+    INSERT INTO login_attempt (user_account_id, attempted_identifier_hmac, user_device_id, login_outcome_id, source_ip, user_agent, created_by)
+    VALUES (p_user_account_id, p_identifier_hmac, p_user_device_id, coalesce(v_outcome, 1), p_source_ip, p_user_agent, p_user_account_id);
+    RETURN v_session;
+END $$;
+
+-- Revocation is always an event (rule group 9); created_by is who revoked.
+CREATE OR REPLACE FUNCTION app_revoke_session(p_user_session_id bigint, p_revocation_reason_id bigint) RETURNS void
+LANGUAGE sql AS $$
+    WITH ended AS (UPDATE user_session SET ended_at = now(), session_end_reason_id = 4
+                   WHERE id = p_user_session_id AND ended_at IS NULL RETURNING id, user_device_id)
+    INSERT INTO session_revocation_event (user_session_id, user_device_id, revocation_reason_id)
+    SELECT id, user_device_id, p_revocation_reason_id FROM ended
+$$;
+CREATE OR REPLACE FUNCTION app_revoke_device(p_user_device_id bigint, p_revocation_reason_id bigint) RETURNS void
+LANGUAGE sql AS $$
+    WITH revoked AS (UPDATE user_device SET revoked_at = now() WHERE id = p_user_device_id AND revoked_at IS NULL RETURNING id)
+    INSERT INTO session_revocation_event (user_device_id, revocation_reason_id)
+    SELECT id, p_revocation_reason_id FROM revoked
+$$;
+
+CALL make_audited('licence');
+CALL make_audited('licence_seat');
+CALL make_audited('user_device');
 
 -- -----------------------------------------------------------------------------
 -- Classification and nullability justification (rule groups 5, 6)

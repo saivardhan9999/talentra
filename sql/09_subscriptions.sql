@@ -13,10 +13,10 @@ SET app.current_user_id = '1';
 CALL create_lookup_table('billing_period',       'monthly, quarterly, half_yearly, annual');
 CALL create_lookup_table('entitlement_type',     'job_posting, profile_download, outreach_message, featured_job');
 CALL create_lookup_table('subscription_status',  'trial, active, past_due, cancelled, expired');
-CALL create_lookup_table('payment_purpose',      'subscription, wallet_recharge');
-CALL create_lookup_table('payment_order_status', 'created, pending, paid, failed, cancelled, refunded, partially_refunded');
-CALL create_lookup_table('refund_status',        'requested, processing, completed, failed');
-CALL create_lookup_table('wallet_entry_type',    'recharge, consumption, refund, reversal, adjustment, expiry');
+CALL create_lookup_table('payment_purpose',      'SYSTEM: 1=subscription, 2=wallet_recharge');
+CALL create_lookup_table('payment_order_status', 'SYSTEM: 1=created, 2=pending, 3=paid, 4=failed, 5=cancelled, 6=refunded, 7=partially_refunded');
+CALL create_lookup_table('refund_status',        'SYSTEM: 1=requested, 2=processing, 3=completed, 4=failed');
+CALL create_lookup_table('wallet_entry_type',    'SYSTEM: 1=recharge, 2=consumption, 3=refund, 4=reversal, 5=adjustment, 6=expiry');
 
 CALL seed_lookups('billing_period', ARRAY['monthly|Monthly', 'quarterly|Quarterly', 'half_yearly|Half-yearly', 'annual|Annual']);
 CALL seed_lookups('entitlement_type', ARRAY['job_posting|Job postings', 'profile_download|Profile downloads',
@@ -89,8 +89,8 @@ CREATE TABLE payment_order (
     CONSTRAINT uq_payment_order_gateway_order_ref UNIQUE (gateway_order_ref),
     CONSTRAINT ck_payment_order_order_amount CHECK (order_amount > 0),
     -- a wallet recharge (purpose 2) states the credits it buys; a subscription order buys none
-    CONSTRAINT ck_payment_order_credit_quantity CHECK (credit_quantity > 0 AND payment_purpose_id = 2
-                                                       OR credit_quantity IS NULL AND payment_purpose_id <> 2)
+    -- (written so it never evaluates to NULL for a recharge: a NULL CHECK result counts as a pass)
+    CONSTRAINT ck_payment_order_credit_quantity CHECK ((payment_purpose_id = 2) = (credit_quantity IS NOT NULL) AND credit_quantity > 0)
 );
 CREATE INDEX idx_payment_order_organisation_id ON payment_order (organisation_id, created_at DESC);
 
@@ -187,7 +187,9 @@ CREATE TABLE subscription_period (
     updated_by       bigint      NOT NULL DEFAULT app_current_user_id() REFERENCES user_account (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     CONSTRAINT uq_subscription_period_subscription_id_renewal_number UNIQUE (subscription_id, renewal_number),
     CONSTRAINT ck_subscription_period_renewal_number CHECK (renewal_number >= 0),
-    CONSTRAINT ck_subscription_period_date_range CHECK (period_end_at > period_start_at)
+    CONSTRAINT ck_subscription_period_date_range CHECK (period_end_at > period_start_at),
+    -- B47 / rule group 10: periods of a subscription (and so of its one licence) never overlap; back-to-back terms are allowed
+    CONSTRAINT uq_subscription_period_no_overlap EXCLUDE USING gist (subscription_id WITH =, tstzrange(period_start_at, period_end_at) WITH &&)
 );
 -- An order pays for at most one period (1 : 0..1).
 CREATE UNIQUE INDEX uq_subscription_period_payment_order_id ON subscription_period (payment_order_id) WHERE payment_order_id IS NOT NULL;
@@ -223,7 +225,13 @@ CREATE TABLE wallet_ledger_entry (
     created_at                      timestamptz  NOT NULL DEFAULT now(),
     created_by                      bigint       NOT NULL DEFAULT app_current_user_id() REFERENCES user_account (id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     CONSTRAINT ck_wallet_ledger_entry_credit_delta CHECK (credit_delta <> 0),
-    CONSTRAINT ck_wallet_ledger_entry_balance_after CHECK (balance_after >= 0)
+    CONSTRAINT ck_wallet_ledger_entry_balance_after CHECK (balance_after >= 0),
+    -- entry type decides the sign and the reference it must carry (SYSTEM ids, see the lookup)
+    CONSTRAINT ck_wallet_ledger_entry_recharge CHECK ((wallet_entry_type_id = 1) = (payment_order_id IS NOT NULL)),
+    CONSTRAINT ck_wallet_ledger_entry_refund CHECK ((wallet_entry_type_id = 3) = (refund_id IS NOT NULL)),
+    CONSTRAINT ck_wallet_ledger_entry_reversal CHECK ((wallet_entry_type_id = 4) = (reverses_wallet_ledger_entry_id IS NOT NULL)),
+    CONSTRAINT ck_wallet_ledger_entry_sign CHECK (CASE WHEN wallet_entry_type_id = 1 THEN credit_delta > 0
+                                                       WHEN wallet_entry_type_id IN (2, 3, 6) THEN credit_delta < 0 ELSE true END)
 );
 CREATE INDEX idx_wallet_ledger_entry_wallet_id ON wallet_ledger_entry (wallet_id, occurred_at);
 -- A recharge order credits the wallet once; a refund debits it once (1 : 0..1 each).
@@ -256,6 +264,105 @@ CALL make_append_only('profile_download_event');
 -- Phase 1 hand-off: a profile view that consumes credit points at its ledger entry.
 ALTER TABLE profile_view_event
     ADD COLUMN wallet_ledger_entry_id bigint REFERENCES wallet_ledger_entry (id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+-- -----------------------------------------------------------------------------
+-- M14 (B47) rules. The ledger is the only way a wallet balance changes: inserting
+-- an entry locks the wallet row, so concurrent debits queue and can never overdraw.
+-- Corrections are reversals that reference the original (rule group 10).
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION trg_wallet_ledger_entry_rules() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE w wallet; o payment_order; orig wallet_ledger_entry;
+BEGIN
+    SELECT * INTO w FROM wallet WHERE id = NEW.wallet_id FOR UPDATE;
+    NEW.balance_after := w.credit_balance + NEW.credit_delta;
+    IF NEW.balance_after < 0 THEN
+        RAISE EXCEPTION 'insufficient credits: wallet % holds %, entry needs %', w.id, w.credit_balance, -NEW.credit_delta;
+    END IF;
+    IF NEW.payment_order_id IS NOT NULL THEN
+        SELECT * INTO o FROM payment_order WHERE id = NEW.payment_order_id;
+        IF o.payment_order_status_id <> 3 OR o.payment_purpose_id <> 2 OR o.organisation_id <> w.organisation_id
+           OR NEW.credit_delta <> o.credit_quantity THEN
+            RAISE EXCEPTION 'a recharge credits exactly the credits of a paid wallet-recharge order of the wallet''s organisation (order %)', o.id;
+        END IF;
+    END IF;
+    IF NEW.refund_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM refund f JOIN payment_order po ON po.id = f.payment_order_id
+        WHERE f.id = NEW.refund_id AND f.refund_status_id = 3 AND po.payment_purpose_id = 2 AND po.organisation_id = w.organisation_id) THEN
+        RAISE EXCEPTION 'refund % is not a completed wallet-recharge refund of the wallet''s organisation', NEW.refund_id;
+    END IF;
+    IF NEW.reverses_wallet_ledger_entry_id IS NOT NULL THEN
+        SELECT * INTO orig FROM wallet_ledger_entry WHERE id = NEW.reverses_wallet_ledger_entry_id;
+        IF orig.wallet_id <> NEW.wallet_id OR orig.wallet_entry_type_id = 4 OR NEW.credit_delta <> -orig.credit_delta THEN
+            RAISE EXCEPTION 'a reversal negates exactly one non-reversal entry of the same wallet (entry %)', orig.id;
+        END IF;
+    END IF;
+    UPDATE wallet SET credit_balance = NEW.balance_after WHERE id = NEW.wallet_id;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_wallet_ledger_entry_rules BEFORE INSERT ON wallet_ledger_entry
+    FOR EACH ROW EXECUTE FUNCTION trg_wallet_ledger_entry_rules();
+
+-- The cached balance starts at 0 and moves only from inside the ledger trigger (depth 2).
+CREATE OR REPLACE FUNCTION trg_wallet_balance_guard() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF (TG_OP = 'INSERT' AND NEW.credit_balance <> 0)
+       OR (TG_OP = 'UPDATE' AND NEW.credit_balance IS DISTINCT FROM OLD.credit_balance AND pg_trigger_depth() < 2) THEN
+        RAISE EXCEPTION 'wallet balance changes only through wallet_ledger_entry';
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_wallet_balance_guard BEFORE INSERT OR UPDATE ON wallet
+    FOR EACH ROW EXECUTE FUNCTION trg_wallet_balance_guard();
+
+-- Refunds: only of a paid order, in its currency, never more than was paid in total.
+-- Locking the order row serialises concurrent refunds of one order.
+CREATE OR REPLACE FUNCTION trg_refund_rules() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE o payment_order; v_refunded numeric(14,2);
+BEGIN
+    SELECT * INTO o FROM payment_order WHERE id = NEW.payment_order_id FOR UPDATE;
+    IF o.payment_order_status_id NOT IN (3, 6, 7) THEN RAISE EXCEPTION 'order % is not paid; nothing to refund', o.id; END IF;
+    IF NEW.refund_currency_id <> o.order_currency_id THEN RAISE EXCEPTION 'refund currency must be the order currency'; END IF;
+    SELECT coalesce(sum(refund_amount), 0) INTO v_refunded FROM refund
+    WHERE payment_order_id = o.id AND refund_status_id <> 4 AND id <> NEW.id;
+    IF NEW.refund_status_id <> 4 AND v_refunded + NEW.refund_amount > o.order_amount THEN
+        RAISE EXCEPTION 'refunds of order % would total % of %', o.id, v_refunded + NEW.refund_amount, o.order_amount;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_refund_rules BEFORE INSERT OR UPDATE OF payment_order_id, refund_amount, refund_currency_id, refund_status_id ON refund
+    FOR EACH ROW EXECUTE FUNCTION trg_refund_rules();
+
+-- An invoice is issued for a paid order and bills exactly its amount.
+CREATE OR REPLACE FUNCTION trg_invoice_rules() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE o payment_order;
+BEGIN
+    SELECT * INTO o FROM payment_order WHERE id = NEW.payment_order_id;
+    IF o.payment_order_status_id NOT IN (3, 6, 7) THEN RAISE EXCEPTION 'order % is not paid; no invoice', o.id; END IF;
+    IF NEW.total_amount <> o.order_amount OR NEW.invoice_currency_id <> o.order_currency_id THEN
+        RAISE EXCEPTION 'invoice total must equal order % amount and currency', o.id;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_invoice_rules BEFORE INSERT ON invoice FOR EACH ROW EXECUTE FUNCTION trg_invoice_rules();
+
+-- A paid period is paid by a paid subscription order of the subscribing organisation.
+CREATE OR REPLACE FUNCTION trg_subscription_period_rules() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.payment_order_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM payment_order o JOIN subscription s ON s.id = NEW.subscription_id
+        WHERE o.id = NEW.payment_order_id AND o.payment_purpose_id = 1 AND o.payment_order_status_id IN (3, 6, 7)
+          AND o.organisation_id = s.organisation_id) THEN
+        RAISE EXCEPTION 'period must be paid by a paid subscription order of the subscribing organisation (order %)', NEW.payment_order_id;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER trg_subscription_period_rules BEFORE INSERT OR UPDATE OF payment_order_id, subscription_id ON subscription_period
+    FOR EACH ROW EXECUTE FUNCTION trg_subscription_period_rules();
 
 -- -----------------------------------------------------------------------------
 -- Classification and nullability justification (rule groups 5, 6)
@@ -292,7 +399,7 @@ COMMENT ON COLUMN subscription_period.period_end_at    IS 'class=Internal';
 COMMENT ON COLUMN subscription_period.payment_order_id IS 'class=Internal; null=trial or complimentary period';
 COMMENT ON COLUMN wallet.credit_balance                IS 'class=Internal; running total of the ledger';
 COMMENT ON COLUMN wallet_ledger_entry.credit_delta     IS 'class=Internal; + credit, - debit, never 0';
-COMMENT ON COLUMN wallet_ledger_entry.balance_after    IS 'class=Internal';
+COMMENT ON COLUMN wallet_ledger_entry.balance_after    IS 'class=Internal; computed by the ledger trigger';
 COMMENT ON COLUMN wallet_ledger_entry.payment_order_id IS 'class=Internal; null=entry not funded by a payment (consumption, adjustment)';
 COMMENT ON COLUMN wallet_ledger_entry.refund_id        IS 'class=Internal; null=entry not caused by a refund';
 COMMENT ON COLUMN wallet_ledger_entry.reverses_wallet_ledger_entry_id IS 'class=Internal; null=not a correction of an earlier entry';

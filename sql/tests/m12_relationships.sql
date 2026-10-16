@@ -84,11 +84,19 @@ BEGIN
 
     INSERT INTO job_requirement (organisation_id, posted_by_user_account_id, title, description, job_category_id,
         employment_type_id, work_mode_id, job_requirement_status_id, publish_state_id, number_of_positions)
-    VALUES (o1, u1, 'M12 job one', 'x', 4, 1, 1, 1, 1, 1) RETURNING id INTO j1;
+    VALUES (o1, u2, 'M12 job one', 'x', 4, 1, 1, 1, 1, 1) RETURNING id INTO j1;
     INSERT INTO job_requirement (organisation_id, posted_by_user_account_id, title, description, job_category_id,
         employment_type_id, work_mode_id, job_requirement_status_id, publish_state_id, number_of_positions)
-    VALUES (o1, u1, 'M12 job two', 'x', 4, 1, 1, 1, 1, 1) RETURNING id INTO j2;
+    VALUES (o1, u2, 'M12 job two', 'x', 4, 1, 1, 1, 1, 1) RETURNING id INTO j2;
+    -- the M14 rules run first, so the request is valid and accepted: u1 consultant, u2 employer, job open to consultants
+    UPDATE job_requirement SET is_open_to_consultants = true, job_requirement_status_id = 3 WHERE id = j1;
+    INSERT INTO user_account_role (user_account_id, role_id) VALUES (u1, 8);
+    INSERT INTO organisation_member (organisation_id, user_account_id, role_id) VALUES (o1, u2, 6);
+    PERFORM set_config('app.current_user_id', u1::text, true);
     INSERT INTO sourcing_request (job_requirement_id, consultant_user_account_id) VALUES (j1, u1) RETURNING id INTO r1;
+    PERFORM set_config('app.current_user_id', u2::text, true);
+    UPDATE sourcing_request SET sourcing_request_status_id = 2 WHERE id = r1;
+    PERFORM set_config('app.current_user_id', u1::text, true);
     BEGIN
         INSERT INTO outreach_batch (sender_user_account_id, job_requirement_id, sourcing_request_id, outreach_channel_id, message_template_ref)
         VALUES (u1, j2, r1, 1, 'tpl');
