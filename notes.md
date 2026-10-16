@@ -297,3 +297,38 @@ The M17 and M18 code both passed on the first run.
 **Also done:** a `/doctor` health check. Unused GSD commands and agents were moved to `~/.claude/disabled/`, and auto mode is now the default permission mode.
 
 **Disk:** the seeded database is 16 GB, and C: had 12 GB free afterwards.
+
+---
+
+## After M20 — demo UI and CI (outside the milestone list)
+
+**Demo UI (`ui/`).** A small Node.js app with two dependencies (Express, pg) and one page in plain JavaScript:
+- **Six tabs:** job search, candidate search, my applications (English / Tamil / Hindi labels), pipeline, hiring funnel, privacy and blocking.
+- **"Viewing as" switch:** six people resolved from the seed. Every request runs as `talentra_app` with that person's identity, so row-level security decides what each person sees.
+- **`ui/smoke-test.js`:** checks every screen plus the blocking walkthrough (block → hidden from that company's recruiter → still visible to another company's → the block itself invisible → unblock), and leaves the data unchanged.
+- **Speed at laptop scale:** 0.1–0.3 s per screen; name search with a city about 1 s.
+
+**CI (`.github/workflows/verify.yml`).**
+- On every push and pull request: start `postgres:16`, rebuild, run M1–M18, seed at 1%, run M19–M20, keep the log, post the result to Discord.
+- The webhook URL lives in the `DISCORD_WEBHOOK_URL` repository secret.
+- `ci/notify_discord.py` builds the message from environment variables only (no shell splicing), disables @mentions, and never fails the build.
+- ChatOps was deliberately skipped (an always-on bot with a token, for no real gain).
+- Setup steps are in `docs/ci.md`.
+- **It hasn't run yet:** it starts when you commit and push, and the Discord secret has to be added on GitHub.
+
+**Errors and fixes**
+| Problem | Cause | Fix |
+|---|---|---|
+| **Job search 3.7 s, candidate name search timing out** (as the app role, at laptop scale) | **Row-level security cost:** helper calls in policies (`app_has_permission`, `app_current_user_is_recruiter`, `app_current_user_id`) ran once per row, and `app_can_see_candidate(id)` re-read the profile, memberships and blocks for every row. RLS applies its checks before full-text or name-similarity filters, so a search paid that cost across 100k jobs or 1M profiles. M18's code comment had predicted this ("measure in M21") | Every helper call in a policy is wrapped in `(SELECT …)`, so PostgreSQL evaluates it once per query. `candidate_profile` states its visibility rule inline, with two definer-rights helpers run once per query (can the viewer see employers-only profiles; who has blocked the viewer). Same rules: M10 and M18 re-run and passing. Job search is now ~0.15 s |
+| Name-only candidate search still slow (several seconds) | Under RLS, PostgreSQL won't run a non-leakproof filter such as trigram similarity before the security checks, so the name index can't be used first | Recorded for M21. The UI pre-fills the candidate's city, so the city index narrows the search (~1 s) |
+| **The UI couldn't log in** ("password authentication failed") | A native **PostgreSQL 18 Windows service** also listens on port 5432 over IPv4, and `localhost` reached it instead of Docker. The scripts never noticed because they use `docker exec` | Recreated the container mapping host port **5433** (same data volume, nothing lost); the UI defaults to 5433; docs updated. The other PostgreSQL was left untouched |
+| Tests would wipe the seeded database | `run_phase1.sh` always rebuilt the database named `talentra` | `TALENTRA_DB` chooses the database: `TALENTRA_DB=talentra_ci` rebuilds and tests a scratch copy. The M14 concurrency test connects to `current_database()` instead of a hard-coded name |
+| `operator does not exist: bigint <> bigint[]` | `<> ALL ((SELECT f()))` is read as "against each row of a subquery", not an array | Cast to `::bigint[]` |
+| The full run with seed failed in step 06 (twice): "no free seat", then "device limit reached" | In a full run M14 runs before the seed and leaves a committed one-seat licence fixture; the seed added seats and sessions to *all* licences and devices | The seed touches only the licences, seats and devices it created |
+| M20 Q1 returned no rows at 1% scale | Hard-coded "Java developer in Bengaluru" had no matching open posting among 1,000 jobs | Q1 and Q2 pick the city with the most matching openings / candidates, so they return rows at any scale (CI runs at 1%) |
+| The smoke test's block check "failed" | It looked for any "Divya Kumar"; a namesake was still visible | The test checks the exact profile id. A leftover block from the failed run was undone, as that candidate |
+| The background server started in the wrong folder | A background shell ignored `cd` | Start it with an absolute path |
+| The dry-run notifier crashed printing ✅ / ❌ | Windows console code page | The dry-run prints ASCII-escaped JSON |
+| CI would hit "Permission denied" on `./run_phase1.sh` | Committed from Windows without the executable bit (`100644`) | The workflow calls `bash ./run_phase1.sh` |
+
+**Verified:** a full M1–M20 run in the scratch database at 1% scale passes (what CI will run). The seeded database got the identical 53 policies, matching fingerprints, without a reseed.

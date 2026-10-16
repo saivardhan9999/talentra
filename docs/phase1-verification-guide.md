@@ -14,7 +14,7 @@ A milestone is verified when its script passes **and** a reviewer ticks its chec
 1. Start Docker Desktop.
 2. From the repo root, start PostgreSQL 16 with the `sql` folder mounted (skip if `docker ps` already shows `talentra-pg`):
    ```sh
-   docker run -d --name talentra-pg --shm-size=1g -e POSTGRES_PASSWORD=talentra -p 5432:5432 -v "$PWD/sql:/sql" postgres:16
+   docker run -d --name talentra-pg --shm-size=1g -e POSTGRES_PASSWORD=talentra -p 5433:5432 -v "$PWD/sql:/sql" postgres:16
    ```
 3. Run everything once to confirm the environment works:
    ```sh

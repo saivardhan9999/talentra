@@ -141,10 +141,12 @@ SELECT l.id, m.user_account_id, l.created_at + interval '1 day'
 FROM licence l
 JOIN LATERAL (SELECT m.user_account_id, row_number() OVER (ORDER BY m.role_id DESC, m.user_account_id) AS n
               FROM organisation_member m WHERE m.organisation_id = l.organisation_id AND m.valid_to IS NULL AND m.valid_from <= now()) m ON m.n <= l.max_users
-WHERE l.licence_status_id = 1;
+WHERE l.licence_status_id = 1
+  AND l.subscription_id IN (SELECT sub_id FROM seed.sub);   -- only seeded licences (test fixtures may already exist)
 
 CREATE TABLE seed.login_user AS
-SELECT s.user_account_id AS user_id, true AS licensed FROM licence_seat s WHERE s.released_at IS NULL
+SELECT s.user_account_id AS user_id, true AS licensed FROM licence_seat s JOIN licence l ON l.id = s.licence_id
+WHERE s.released_at IS NULL AND l.subscription_id IN (SELECT sub_id FROM seed.sub)
 UNION ALL SELECT c.user_id, false FROM seed.cand_p c WHERE seed.r(c.g, 113) < 0.05 AND c.live;
 INSERT INTO user_device (user_account_id, device_platform_id, device_fingerprint_hmac, device_label, first_seen_at, last_seen_at)
 SELECT u.user_id, 1 + floor(seed.r(u.user_id * 3 + k, 114) * 6)::int, seed.hmac('device:' || u.user_id || ':' || k),
@@ -160,20 +162,21 @@ SELECT d.user_account_id, d.id, seed.hmac('sess:' || d.id || ':' || n),
        now() - interval '1 day' * (n * 9 + 2) + interval '12 hours', now() - interval '1 day' * (n * 9 + 2) + interval '3 hours',
        CASE WHEN n % 3 = 0 THEN 2 ELSE 1 END, d.user_account_id, d.user_account_id
 FROM user_device d CROSS JOIN generate_series(1, 10) n
-WHERE n <= CASE WHEN d.user_account_id IN (SELECT user_id FROM seed.login_user WHERE licensed) THEN 10 ELSE 3 END;
+WHERE d.user_account_id IN (SELECT user_id FROM seed.login_user)   -- seeded users only
+  AND n <= CASE WHEN d.user_account_id IN (SELECT user_id FROM seed.login_user WHERE licensed) THEN 10 ELSE 3 END;
 INSERT INTO login_attempt (user_account_id, attempted_identifier_hmac, user_device_id, login_outcome_id, source_ip, attempted_at, created_by)
 SELECT s.user_account_id, seed.hmac('login:' || s.user_account_id), s.user_device_id, 1, '49.36.0.1', s.started_at, s.user_account_id
 FROM user_session s;
 INSERT INTO login_attempt (user_account_id, attempted_identifier_hmac, user_device_id, login_outcome_id, source_ip, attempted_at, created_by)
 SELECT d.user_account_id, seed.hmac('login:' || d.user_account_id), d.id, 2, '49.36.0.1', now() - interval '3 days' * seed.r(d.id, 117), d.user_account_id
-FROM user_device d WHERE seed.r(d.id, 118) < 0.03;
+FROM user_device d WHERE seed.r(d.id, 118) < 0.03 AND d.user_account_id IN (SELECT user_id FROM seed.login_user);
 
 -- current logins through the login entry point, one per device: users with more devices than their
 -- licence allows are refused at the limit (login history + audit trail)
 SELECT count(*) FILTER (WHERE x IS NULL) AS refused_at_device_limit, count(x) AS live_sessions
 FROM (SELECT app_open_session(d.user_account_id, d.id, seed.hmac('login:' || d.user_account_id), seed.hmac('live:' || d.id),
                               now() + interval '8 hours', '49.36.0.1') AS x
-      FROM user_device d ORDER BY d.user_account_id, d.id) s \gset
+      FROM user_device d WHERE d.user_account_id IN (SELECT user_id FROM seed.login_user) ORDER BY d.user_account_id, d.id) s \gset
 \echo '         logins at the device limit refused:' :refused_at_device_limit ', live sessions:' :live_sessions
 SELECT count(*) FROM (SELECT app_revoke_session(s.id, 4) FROM user_session s WHERE s.ended_at IS NULL AND seed.r(s.id, 119) < 0.02) x \g /dev/null
 SELECT count(*) FROM (SELECT app_revoke_device(d.id, 3) FROM user_device d WHERE seed.r(d.id, 120) < 0.01) x \g /dev/null

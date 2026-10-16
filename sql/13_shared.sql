@@ -233,15 +233,35 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
                                      AND (b.blocked_user_account_id = me.uid
                                           OR b.blocked_organisation_id IN (SELECT organisation_id FROM my_orgs))))))
 $$;
--- ponytail: one function call per row; measure on 1M profiles in M21 and inline into the policy if it shows.
+-- The profile table itself uses the same rule written inline: calling the function per row
+-- cost a full lookup per profile and timed out a name search over 1M profiles (demo UI,
+-- after M20). The viewer-side facts are computed once per query instead:
+-- whether the viewer may see "employers only" profiles, and who has blocked the viewer.
+CREATE OR REPLACE FUNCTION app_viewer_sees_employers_only() RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    SELECT EXISTS (SELECT 1 FROM organisation_member m WHERE m.user_account_id = app_current_user_id()
+                   AND m.valid_from <= now() AND (m.valid_to IS NULL OR m.valid_to > now()))
+        OR EXISTS (SELECT 1 FROM user_account_role g WHERE g.user_account_id = app_current_user_id() AND g.role_id = 8 AND g.revoked_at IS NULL)
+$$;
+CREATE OR REPLACE FUNCTION app_candidates_blocking_viewer() RETURNS bigint[]
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    SELECT coalesce(array_agg(DISTINCT b.blocker_user_account_id), '{}')
+    FROM block_entry b
+    WHERE b.unblocked_at IS NULL
+      AND (b.blocked_user_account_id = app_current_user_id()
+           OR b.blocked_organisation_id IN (SELECT m.organisation_id FROM organisation_member m WHERE m.user_account_id = app_current_user_id()
+                                            AND m.valid_from <= now() AND (m.valid_to IS NULL OR m.valid_to > now())))
+$$;
 
 ALTER TABLE candidate_profile ENABLE ROW LEVEL SECURITY;
 CREATE POLICY candidate_profile_owner ON candidate_profile FOR ALL TO talentra_app
-    USING (user_account_id = app_current_user_id()) WITH CHECK (user_account_id = app_current_user_id());
+    USING (user_account_id = (SELECT app_current_user_id())) WITH CHECK (user_account_id = (SELECT app_current_user_id()));
 CREATE POLICY candidate_profile_platform_admin ON candidate_profile FOR ALL TO talentra_app
-    USING (app_has_permission('platform.admin')) WITH CHECK (app_has_permission('platform.admin'));
+    USING ((SELECT app_has_permission('platform.admin'))) WITH CHECK ((SELECT app_has_permission('platform.admin')));
 CREATE POLICY candidate_profile_visible ON candidate_profile FOR SELECT TO talentra_app
-    USING (app_can_see_candidate(id));
+    USING (deleted_at IS NULL AND profile_visibility_id <> 3
+           AND (profile_visibility_id = 1 OR (SELECT app_viewer_sees_employers_only()))
+           AND user_account_id <> ALL ((SELECT app_candidates_blocking_viewer())::bigint[]));
 
 DO $$
 DECLARE t text;
@@ -251,29 +271,29 @@ BEGIN
                              'candidate_preferred_location', 'candidate_preferred_job_role', 'resume'] LOOP
         EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
         EXECUTE format($p$CREATE POLICY %I ON %I FOR ALL TO talentra_app
-            USING (candidate_profile_id IN (SELECT id FROM candidate_profile WHERE user_account_id = app_current_user_id()))
-            WITH CHECK (candidate_profile_id IN (SELECT id FROM candidate_profile WHERE user_account_id = app_current_user_id()))$p$,
+            USING (candidate_profile_id IN (SELECT id FROM candidate_profile WHERE user_account_id = (SELECT app_current_user_id())))
+            WITH CHECK (candidate_profile_id IN (SELECT id FROM candidate_profile WHERE user_account_id = (SELECT app_current_user_id())))$p$,
             t || '_owner', t);
         EXECUTE format($p$CREATE POLICY %I ON %I FOR ALL TO talentra_app
-            USING (app_has_permission('platform.admin')) WITH CHECK (app_has_permission('platform.admin'))$p$, t || '_platform_admin', t);
+            USING ((SELECT app_has_permission('platform.admin'))) WITH CHECK ((SELECT app_has_permission('platform.admin')))$p$, t || '_platform_admin', t);
         EXECUTE format('CREATE POLICY %I ON %I FOR SELECT TO talentra_app USING (app_can_see_candidate(candidate_profile_id))',
             t || '_visible', t);
     END LOOP;
 END $$;
 ALTER TABLE resume_version ENABLE ROW LEVEL SECURITY;
 CREATE POLICY resume_version_owner ON resume_version FOR ALL TO talentra_app
-    USING (resume_id IN (SELECT r.id FROM resume r JOIN candidate_profile c ON c.id = r.candidate_profile_id WHERE c.user_account_id = app_current_user_id()))
-    WITH CHECK (resume_id IN (SELECT r.id FROM resume r JOIN candidate_profile c ON c.id = r.candidate_profile_id WHERE c.user_account_id = app_current_user_id()));
+    USING (resume_id IN (SELECT r.id FROM resume r JOIN candidate_profile c ON c.id = r.candidate_profile_id WHERE c.user_account_id = (SELECT app_current_user_id())))
+    WITH CHECK (resume_id IN (SELECT r.id FROM resume r JOIN candidate_profile c ON c.id = r.candidate_profile_id WHERE c.user_account_id = (SELECT app_current_user_id())));
 CREATE POLICY resume_version_platform_admin ON resume_version FOR ALL TO talentra_app
-    USING (app_has_permission('platform.admin')) WITH CHECK (app_has_permission('platform.admin'));
+    USING ((SELECT app_has_permission('platform.admin'))) WITH CHECK ((SELECT app_has_permission('platform.admin')));
 CREATE POLICY resume_version_visible ON resume_version FOR SELECT TO talentra_app
     USING (resume_id IN (SELECT r.id FROM resume r WHERE app_can_see_candidate(r.candidate_profile_id)));
 
 ALTER TABLE block_entry ENABLE ROW LEVEL SECURITY;
 CREATE POLICY block_entry_blocker ON block_entry FOR ALL TO talentra_app
-    USING (blocker_user_account_id = app_current_user_id()) WITH CHECK (blocker_user_account_id = app_current_user_id());
+    USING (blocker_user_account_id = (SELECT app_current_user_id())) WITH CHECK (blocker_user_account_id = (SELECT app_current_user_id()));
 CREATE POLICY block_entry_platform_admin ON block_entry FOR ALL TO talentra_app
-    USING (app_has_permission('platform.admin')) WITH CHECK (app_has_permission('platform.admin'));
+    USING ((SELECT app_has_permission('platform.admin'))) WITH CHECK ((SELECT app_has_permission('platform.admin')));
 
 -- Views run with the caller's rights, so row-level security applies through them too.
 -- (Before M18 every v_ view ran as its owner and bypassed RLS: a recruiter could read

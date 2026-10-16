@@ -4,6 +4,13 @@ SELECT (SELECT id FROM city WHERE name = 'Bengaluru') AS city_blr,
        (SELECT id FROM city WHERE name = 'Chennai') AS city_chennai,
        (SELECT id FROM skill WHERE code = 'java') AS skill_java,
        (SELECT id FROM language WHERE code = 'ta') AS lang_ta \gset
+-- search cities chosen from the data, so Q1 / Q2 return rows at any seed scale (CI runs at 1%)
+SELECT coalesce((SELECT l.city_id FROM job_requirement r JOIN job_requirement_location l ON l.job_requirement_id = r.id
+                 WHERE r.search_document @@ websearch_to_tsquery('simple', 'java developer') AND r.publish_state_id = 3 AND r.job_requirement_status_id = 3
+                 GROUP BY l.city_id ORDER BY count(*) DESC, l.city_id LIMIT 1), :city_blr) AS city_jobs \gset
+SELECT coalesce((SELECT p.current_city_id FROM candidate_skill s JOIN candidate_profile p ON p.id = s.candidate_profile_id
+                 WHERE s.skill_id = :skill_java AND p.total_experience_months BETWEEN 36 AND 96
+                 GROUP BY p.current_city_id ORDER BY count(*) DESC, p.current_city_id LIMIT 1), :city_chennai) AS city_cands \gset
 SELECT f.job_requirement_id AS job_busy, r.organisation_id AS org_busy
 FROM fact_job_posting f JOIN job_requirement r ON r.id = f.job_requirement_id
 ORDER BY f.application_count DESC, f.job_requirement_id LIMIT 1 \gset

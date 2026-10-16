@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Talentra Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap">
+<style>
+/* Layout: a working console. Header with the "viewing as" switch, tabs, one panel at a time. */
+:root {
+  --bg: #f4f6f5; --panel: #ffffff; --ink: #172b26; --ink-2: #566b66; --rule: #d9e1de;
+  --accent: #1d6f63; --accent-ink: #ffffff; --accent-soft: #e0f0ec; --warn: #9a5b00; --warn-soft: #fbf0dd;
+  --font: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; --mono: "IBM Plex Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #0f1716; --panel: #162220; --ink: #e2ece9; --ink-2: #9db1ac; --rule: #2a3a37;
+  --accent: #5cc2b1; --accent-ink: #0f1716; --accent-soft: #1b3531; --warn: #e3a64a; --warn-soft: #33270f; color-scheme: dark } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font); }
+header { background: var(--panel); border-bottom: 1px solid var(--rule); padding: 14px max(16px, 3vw); display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; }
+h1 { font-size: 1.25rem; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+h1 span { color: var(--ink-2); font-weight: 400; font-size: 0.9rem; margin-left: 8px; }
+.who { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.who label { font-size: 0.85rem; color: var(--ink-2); }
+select, input, button { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 7px 10px; }
+button { cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 500; }
+select:focus-visible, input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+nav { display: flex; gap: 2px; padding: 0 max(16px, 3vw); background: var(--panel); border-bottom: 1px solid var(--rule); overflow-x: auto; }
+nav button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 10px 14px; color: var(--ink-2); white-space: nowrap; }
+nav button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 500; }
+main { padding: 20px max(16px, 3vw) 48px; max-width: 1200px; }
+.panel[hidden] { display: none; }
+.intro { color: var(--ink-2); margin: 0 0 14px; max-width: 75ch; }
+form { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; align-items: center; }
+form input[type=text] { min-width: 220px; flex: 1 1 220px; }
+.scroll { overflow-x: auto; background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-2); font-weight: 500; }
+tr:last-child td { border-bottom: 0; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 0.8rem; background: var(--accent-soft); color: var(--accent); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.status { margin: 10px 0; font-size: 0.9rem; color: var(--ink-2); min-height: 1.4em; }
+.status.error { color: var(--warn); }
+.bars { display: grid; gap: 6px; margin: 12px 0 18px; max-width: 640px; }
+.bar { display: grid; grid-template-columns: 170px 1fr 70px; gap: 10px; align-items: center; font-size: 0.9rem; }
+.bar i { display: block; height: 14px; background: var(--accent); border-radius: 3px; min-width: 2px; }
+.bar b { font-weight: 400; text-align: right; font-variant-numeric: tabular-nums; }
+.guide { background: var(--accent-soft); border-radius: 8px; padding: 12px 16px; margin: 0 0 16px; max-width: 80ch; }
+.guide ol { margin: 6px 0 0; padding-left: 20px; }
+.mono { font-family: var(--mono); font-size: 0.85rem; }
+@media (max-width: 640px) { .who { margin-left: 0; } .bar { grid-template-columns: 110px 1fr 60px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Talentra <span>demo over the seeded database</span></h1>
+  <div class="who">
+    <label for="persona">Viewing as</label>
+    <select id="persona"></select>
+  </div>
+</header>
+<nav role="tablist">
+  <button role="tab" data-tab="jobs" aria-selected="true">Job search</button>
+  <button role="tab" data-tab="candidates">Candidate search</button>
+  <button role="tab" data-tab="applications">My applications</button>
+  <button role="tab" data-tab="pipeline">Pipeline</button>
+  <button role="tab" data-tab="funnel">Hiring funnel</button>
+  <button role="tab" data-tab="privacy">Privacy and blocking</button>
+</nav>
+<main>
+  <section class="panel" id="tab-jobs">
+    <p class="intro">Search job requirements. A candidate sees published, open jobs. A recruiter sees only their own company's requirements, drafts included, and nothing from other companies: the database enforces this, not the page.</p>
+    <form id="f-jobs"><input id="jobs-q" type="text" placeholder="Keywords, e.g. java developer" value="java developer"><select id="jobs-city"><option value="">Any city</option></select><button class="primary">Search</button></form>
+    <div class="status" id="s-jobs"></div><div class="scroll"><table id="t-jobs"></table></div>
+  </section>
+  <section class="panel" id="tab-candidates" hidden>
+    <p class="intro">Search candidate profiles. Hidden profiles, and anyone who has blocked you or your company, never come back from the database.</p>
+    <form id="f-candidates"><input id="cand-name" type="text" placeholder="Name (optional)"><select id="cand-skill"><option value="">Any skill</option></select><select id="cand-city"><option value="">Any city</option></select><button class="primary">Search</button></form>
+    <div class="status" id="s-candidates"></div><div class="scroll"><table id="t-candidates"></table></div>
+  </section>
+  <section class="panel" id="tab-applications" hidden>
+    <p class="intro">The signed-in candidate's applications. Status labels are UI keys translated per language, falling back to English where a translation is missing.</p>
+    <form id="f-applications"><select id="app-lang"><option value="en">English</option><option value="ta">தமிழ் (Tamil)</option><option value="hi">हिन्दी (Hindi)</option></select><button class="primary">Show</button></form>
+    <div class="status" id="s-applications"></div><div class="scroll"><table id="t-applications"></table></div>
+  </section>
+  <section class="panel" id="tab-pipeline" hidden>
+    <p class="intro">Applications per stage for the busiest requirement you can see, and the latest movements.</p>
+    <form id="f-pipeline"><button class="primary">Load pipeline</button></form>
+    <div class="status" id="s-pipeline"></div><div id="pipe-bars" class="bars"></div><div class="scroll"><table id="t-pipeline"></table></div>
+  </section>
+  <section class="panel" id="tab-funnel" hidden>
+    <p class="intro">Your organisation's monthly hiring funnel, read from the pre-computed analytics aggregate.</p>
+    <form id="f-funnel"><button class="primary">Load funnel</button></form>
+    <div class="status" id="s-funnel"></div><div class="scroll"><table id="t-funnel"></table></div>
+  </section>
+  <section class="panel" id="tab-privacy" hidden>
+    <div class="guide"><strong>Try the blocking rule</strong>
+      <ol>
+        <li>As the <em>Recruiter</em>, open Candidate search and search for the candidate's name: they appear.</li>
+        <li>Switch to the <em>Candidate</em> and block the recruiter's company below.</li>
+        <li>Switch back to the <em>Recruiter</em> and search again: the profile is gone. The <em>other</em> company's recruiter still sees it.</li>
+        <li>Unblock to restore it.</li>
+      </ol>
+    </div>
+    <p class="intro" id="privacy-who"></p>
+    <form id="f-block"><select id="block-org"></select><button class="primary">Block this company</button></form>
+    <div class="status" id="s-privacy"></div><div class="scroll"><table id="t-privacy"></table></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let personas = [];
+const me = () => personas.find((p) => String(p.user_id) === $('persona').value);
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { 'content-type': 'application/json', 'x-persona': $('persona').value } });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error || res.statusText);
+  return body;
+}
+function esc(v) { return v == null ? '' : String(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function table(id, rows, cols) {
+  if (!rows.length) { $(id).innerHTML = '<tr><td>No rows. Nothing you are allowed to see matches.</td></tr>'; return; }
+  $(id).innerHTML = '<thead><tr>' + cols.map((c) => `<th>${c[1]}</th>`).join('') + '</tr></thead><tbody>' +
+    rows.map((r) => '<tr>' + cols.map((c) => `<td class="${c[2] || ''}">${c[3] ? c[3](r[c[0]], r) : esc(r[c[0]])}</td>`).join('') + '</tr>').join('') + '</tbody>';
+}
+async function run(statusId, fn) {
+  const s = $(statusId); s.className = 'status'; s.textContent = 'Loading…';
+  const t0 = performance.now();
+  try { const n = await fn(); s.textContent = (n != null ? n + ' rows · ' : '') + Math.round(performance.now() - t0) + ' ms, as ' + me().label; }
+  catch (e) { s.className = 'status error'; s.textContent = e.message; }
+}
+const money = (v) => v == null ? '<span class="pill warn">not disclosed</span>' : '₹' + Number(v).toLocaleString('en-IN');
+
+$('f-jobs').onsubmit = (e) => { e.preventDefault(); run('s-jobs', async () => {
+  const rows = await api('/api/jobs?q=' + encodeURIComponent($('jobs-q').value) + '&city=' + $('jobs-city').value);
+  table('t-jobs', rows, [['title', 'Title'], ['company', 'Company'], ['cities', 'Cities'],
+    ['status', 'Status', '', (v, r) => `<span class="pill ${v === 'open' ? '' : 'warn'}">${esc(v)}</span> <span class="mono">${esc(r.publish_state)}</span>`],
+    ['salary_min_amount', 'Salary from', 'num', money], ['published', 'Published']]);
+  return rows.length; }); };
+
+$('f-candidates').onsubmit = (e) => { e.preventDefault(); run('s-candidates', async () => {
+  const rows = await api(`/api/candidates?name=${encodeURIComponent($('cand-name').value)}&skill=${$('cand-skill').value}&city=${$('cand-city').value}`);
+  table('t-candidates', rows, [['full_name', 'Name'], ['headline', 'Headline'], ['city', 'City'], ['years', 'Years', 'num'],
+    ['visibility', 'Visibility', '', (v) => `<span class="pill">${esc(v)}</span>`]]);
+  return rows.length; }); };
+
+$('f-applications').onsubmit = (e) => { e.preventDefault(); run('s-applications', async () => {
+  const rows = await api('/api/my-applications?lang=' + $('app-lang').value);
+  table('t-applications', rows, [['title', 'Requirement'], ['company', 'Company'], ['status', 'Status', '', (v) => `<span class="pill">${esc(v)}</span>`],
+    ['applied', 'Applied'], ['since', 'Since']]);
+  return rows.length; }); };
+
+$('f-pipeline').onsubmit = (e) => { e.preventDefault(); run('s-pipeline', async () => {
+  const d = await api('/api/pipeline');
+  if (!d.job) { $('pipe-bars').innerHTML = ''; table('t-pipeline', [], []); return 0; }
+  const max = Math.max(...d.stages.map((s) => s.applications));
+  $('pipe-bars').innerHTML = `<div><strong>${esc(d.job.title)}</strong> · ${esc(d.job.company)}</div>` +
+    d.stages.map((s) => `<div class="bar"><span>${esc(s.stage)}</span><i style="width:${(100 * s.applications / max).toFixed(1)}%"></i><b>${s.applications}</b></div>`).join('');
+  table('t-pipeline', d.recent, [['candidate', 'Candidate'], ['stage', 'Stage', '', (v) => `<span class="pill">${esc(v)}</span>`], ['since', 'Since']]);
+  return d.stages.reduce((a, s) => a + s.applications, 0); }); };
+
+$('f-funnel').onsubmit = (e) => { e.preventDefault(); run('s-funnel', async () => {
+  const rows = await api('/api/funnel');
+  table('t-funnel', rows, [['month', 'Month'], ['applied_count', 'Applied', 'num'], ['shortlisted_count', 'Shortlisted', 'num'],
+    ['interviewed_count', 'Interviewed', 'num'], ['offered_count', 'Offered', 'num'], ['joined_count', 'Joined', 'num'],
+    ['hire_pct', 'Hire %', 'num'], ['avg_days_to_hire', 'Avg days to hire', 'num']]);
+  return rows.length; }); };
+
+async function loadBlocks() {
+  const p = me();
+  $('privacy-who').textContent = p.key === 'candidate' ? 'Companies ' + p.label.replace('Candidate — ', '') + ' has blocked:' :
+    'Switch to the Candidate to manage blocks. Other people cannot see who blocked them: the list below stays empty for them.';
+  await run('s-privacy', async () => {
+    const rows = await api('/api/blocks');
+    table('t-privacy', rows, [['blocked', 'Blocked'], ['since', 'Since'],
+      ['id', '', '', (v) => p.key === 'candidate' ? `<button data-unblock="${v}">Unblock</button>` : '']]);
+    return rows.length; });
+}
+$('f-block').onsubmit = async (e) => { e.preventDefault();
+  try { await api('/api/blocks', { method: 'POST', body: JSON.stringify({ organisation_id: Number($('block-org').value) }) }); }
+  catch (err) { $('s-privacy').className = 'status error'; $('s-privacy').textContent = err.message; return; }
+  loadBlocks(); };
+$('t-privacy').onclick = async (e) => { const id = e.target.dataset.unblock; if (!id) return;
+  await api(`/api/blocks/${id}/unblock`, { method: 'POST' }); loadBlocks(); };
+
+document.querySelectorAll('nav button').forEach((b) => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach((x) => x.setAttribute('aria-selected', x === b));
+  document.querySelectorAll('.panel').forEach((p) => p.hidden = p.id !== 'tab-' + b.dataset.tab);
+  if (b.dataset.tab === 'privacy') loadBlocks();
+});
+$('persona').onchange = () => { $('f-block').hidden = me().key !== 'candidate'; };
+
+(async () => {
+  personas = await api('/api/personas').catch(() => []);
+  $('persona').innerHTML = personas.map((p) => `<option value="${p.user_id}">${esc(p.label)}</option>`).join('');
+  const cand = personas.find((p) => p.key === 'candidate');
+  $('cand-name').value = cand ? cand.label.replace('Candidate — ', '') : '';
+  window.candCity = cand ? cand.city_id : '';
+  $('block-org').innerHTML = personas.filter((p) => p.org_id).filter((p, i, a) => a.findIndex((q) => q.org_id === p.org_id) === i)
+    .map((p) => `<option value="${p.org_id}">${esc(p.org_name)}</option>`).join('');
+  $('f-block').hidden = true;
+  const [cities, skills] = await Promise.all([fetch('/api/cities').then((r) => r.json()), fetch('/api/skills').then((r) => r.json())]);
+  const opts = (list) => list.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('');
+  $('jobs-city').innerHTML += opts(cities); $('cand-city').innerHTML += opts(cities); $('cand-skill').innerHTML += opts(skills);
+  if (window.candCity) $('cand-city').value = String(window.candCity);   // with a city the search uses the city index first
+  $('f-jobs').requestSubmit();
+})();
+</script>
+</body>
+</html>

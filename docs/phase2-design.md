@@ -204,7 +204,7 @@ Full column list with type, nullability, class, FK and null justification: **[`d
 
 **Matrix:** super_admin, admin → `platform.admin`. account_admin → `organisation.manage`, `job_requirement.view`, `application.view`. employer → view + manage for requirements and applications. recruiter → `job_requirement.view`, `application.view`, `application.manage` (works the pipeline, does not post).
 
-**Policy cost.** The organisation policies use `organisation_id IN (SELECT app_organisation_ids_with(...))`, an uncorrelated subquery that runs once per statement rather than once per row. To be measured on 1M rows in Phase 5.
+**Policy cost.** The organisation policies use `organisation_id IN (SELECT app_organisation_ids_with(...))`, an uncorrelated subquery that runs once per statement rather than once per row. To be measured on 1M rows in Phase 5. **Measured after M20:** the other helper calls (`app_has_permission`, `app_current_user_is_recruiter`, `app_current_user_id`) ran once *per row*, so a job search over 100k requirements took 3.7 s as the application role. Every helper call in a policy is now wrapped in `(SELECT …)`, which PostgreSQL evaluates once per query: the same search takes about 0.15 s with identical access results (M10 and M18 re-run).
 
 ### B34 Organisation: effective-dated recruiter mapping
 

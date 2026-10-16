@@ -6,13 +6,15 @@
 # Milestones 19+ need the seeded dataset: after a rebuild it is generated (sql/seed/NN_*.sql) just before
 # the first of them runs, so milestones 1-18 still run against the empty schema.
 #   SEED_SCALE=0.01 ./run_phase1.sh m19   seed at 1% of laptop scale (default 1 = 1M profiles, 5M applications)
+#   TALENTRA_DB=talentra_ci ./run_phase1.sh   rebuild and test in a scratch database, leaving the seeded one alone
 set -eo pipefail
 C=talentra-pg
-PSQL="docker exec $C psql -U postgres -d talentra -q -v ON_ERROR_STOP=1"
+DB=${TALENTRA_DB:-talentra}
+PSQL="docker exec $C psql -U postgres -d $DB -q -v ON_ERROR_STOP=1"
 BUILT=0
 if [ "$1" = "--no-build" ]; then shift; else
-  docker exec $C psql -U postgres -q -c "DROP DATABASE IF EXISTS talentra WITH (FORCE)" \
-    -c "CREATE DATABASE talentra ENCODING 'UTF8' TEMPLATE template0"
+  docker exec $C psql -U postgres -q -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" \
+    -c "CREATE DATABASE $DB ENCODING 'UTF8' TEMPLATE template0"
   for f in $(cd sql && ls [0-9][0-9]_*.sql); do
     echo "== build ${f%.sql}"; $PSQL -f /sql/$f
   done

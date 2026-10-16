@@ -122,10 +122,13 @@ END $$;
 -- Row-level security. Superusers and the table owner bypass RLS (migration,
 -- scheduled jobs); talentra_app never does. No DELETE policy for organisation or
 -- candidate users: requirements are soft-deleted.
+-- Helper calls are wrapped in (SELECT ...): PostgreSQL then evaluates them once per
+-- query instead of once per row. Without it, a search on 100k requirements ran the
+-- permission check 100k times (3.7 s at laptop scale, found by the demo UI after M20).
 -- -----------------------------------------------------------------------------
 ALTER TABLE job_requirement ENABLE ROW LEVEL SECURITY;
 CREATE POLICY job_requirement_platform_admin ON job_requirement FOR ALL TO talentra_app
-    USING (app_has_permission('platform.admin')) WITH CHECK (app_has_permission('platform.admin'));
+    USING ((SELECT app_has_permission('platform.admin'))) WITH CHECK ((SELECT app_has_permission('platform.admin')));
 CREATE POLICY job_requirement_org_read ON job_requirement FOR SELECT TO talentra_app
     USING (organisation_id IN (SELECT app_organisation_ids_with('job_requirement.view')));
 CREATE POLICY job_requirement_org_insert ON job_requirement FOR INSERT TO talentra_app
@@ -136,14 +139,14 @@ CREATE POLICY job_requirement_org_update ON job_requirement FOR UPDATE TO talent
 -- Public job board: published, open, not deleted. Recruiters are excluded: a recruiter
 -- may only see requirements of their own company (docket §3).
 CREATE POLICY job_requirement_public_read ON job_requirement FOR SELECT TO talentra_app
-    USING (deleted_at IS NULL AND publish_state_id = 3 AND job_requirement_status_id = 3 AND NOT app_current_user_is_recruiter());
+    USING (deleted_at IS NULL AND publish_state_id = 3 AND job_requirement_status_id = 3 AND NOT (SELECT app_current_user_is_recruiter()));
 
 ALTER TABLE application ENABLE ROW LEVEL SECURITY;
 CREATE POLICY application_platform_admin ON application FOR ALL TO talentra_app
-    USING (app_has_permission('platform.admin')) WITH CHECK (app_has_permission('platform.admin'));
+    USING ((SELECT app_has_permission('platform.admin'))) WITH CHECK ((SELECT app_has_permission('platform.admin')));
 CREATE POLICY application_candidate ON application FOR ALL TO talentra_app
-    USING (candidate_profile_id IN (SELECT id FROM candidate_profile WHERE user_account_id = app_current_user_id()))
-    WITH CHECK (candidate_profile_id IN (SELECT id FROM candidate_profile WHERE user_account_id = app_current_user_id()));
+    USING (candidate_profile_id IN (SELECT id FROM candidate_profile WHERE user_account_id = (SELECT app_current_user_id())))
+    WITH CHECK (candidate_profile_id IN (SELECT id FROM candidate_profile WHERE user_account_id = (SELECT app_current_user_id())));
 CREATE POLICY application_org_read ON application FOR SELECT TO talentra_app
     USING (job_requirement_id IN (SELECT j.id FROM job_requirement j
                                   WHERE j.organisation_id IN (SELECT app_organisation_ids_with('application.view'))));

@@ -1,0 +1,14 @@
+{
+  "name": "talentra-demo-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Thin local demo UI over the seeded Talentra database (row-level security shown live)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "4.21.2",
+    "pg": "8.13.1"
+  }
+}

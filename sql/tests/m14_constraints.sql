@@ -290,8 +290,8 @@ SELECT uid, dev1, dev2 FROM t_conc \gset
 \set login 'SELECT app_open_session(%s, %s, ''\\x11''::bytea, decode(md5(random()::text), ''hex''), now() + interval ''1 hour'')'
 
 -- c1 logs in inside an open transaction (holding the seat lock); c2 logs in at the same time
-SELECT dblink_connect('c1', 'dbname=talentra user=postgres') \g /dev/null
-SELECT dblink_connect('c2', 'dbname=talentra user=postgres') \g /dev/null
+SELECT dblink_connect('c1', format('dbname=%s user=postgres', current_database())) \g /dev/null
+SELECT dblink_connect('c2', format('dbname=%s user=postgres', current_database())) \g /dev/null
 SELECT dblink_exec('c1', 'BEGIN') \g /dev/null
 CREATE TEMP TABLE t_c1 AS SELECT * FROM dblink('c1', format(:'login', :uid, :dev1)) AS t(session_id bigint);
 SELECT dblink_send_query('c2', format(:'login', :uid, :dev2)) \g /dev/null
