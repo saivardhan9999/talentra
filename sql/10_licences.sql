@@ -134,6 +134,9 @@ CREATE TABLE login_attempt (
     CONSTRAINT ck_login_attempt_device_needs_user CHECK (user_device_id IS NULL OR user_account_id IS NOT NULL)
 ) PARTITION BY RANGE (attempted_at);
 CREATE INDEX idx_login_attempt_user_account_id ON login_attempt (user_account_id, attempted_at);
+-- M21 (B72): the brute-force check on every login ("failures for the identifier just typed, last 15 minutes")
+-- otherwise reads the whole current month of the user index (923 pages at laptop scale, linear in login traffic).
+CREATE INDEX idx_login_attempt_attempted_identifier_hmac ON login_attempt (attempted_identifier_hmac, attempted_at);
 CALL create_monthly_partitions('login_attempt', DATE '2025-01-01', DATE '2027-01-01');
 CALL make_append_only('login_attempt');
 

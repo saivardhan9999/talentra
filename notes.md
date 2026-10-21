@@ -332,3 +332,43 @@ The M17 and M18 code both passed on the first run.
 | CI would hit "Permission denied" on `./run_phase1.sh` | Committed from Windows without the executable bit (`100644`) | The workflow calls `bash ./run_phase1.sh` |
 
 **Verified:** a full M1–M20 run in the scratch database at 1% scale passes (what CI will run). The seeded database got the identical 53 policies, matching fingerprints, without a reseed.
+
+---
+
+## Milestones 21–22 — Performance and security
+
+**M21 (done).** The full report is in `docs/phase5-performance.md`.
+- **Harness:** `perf/benchmark.py` runs each query 3 times to warm up, then 50 measured runs inside the container, and reports min / p50 / p95 / p99 / max. The method, hardware, settings and dataset are stated in the report. The docket's "Section 10" doesn't exist, the same gap as Section 8.
+- **Baseline (B70):** the interactive queries are under 8 ms at p99 (Q2 at 83 ms). The outliers are Q11 duplicate detection (p50 1.98 s) and Q12 time to hire (454 ms, 173 ms after the index).
+- **Indexes with before/after (B71–B73):**
+
+  | Module | Change | Before p50 | After p50 |
+  |---|---|---|---|
+  | Administration | `audit_event (organisation_id, occurred_at)` | 81 ms | **1.2 ms** |
+  | Licences | `login_attempt (attempted_identifier_hmac, attempted_at)`, brute-force check on every login | 2.7 ms | 0.8 ms (923 pages read → a handful) |
+  | Notifications | `notification_delivery (provider_message_ref)`, callbacks | 25 ms | **0.8 ms** |
+  | Analytics | partial `fact_application (joined_date_id)` | 459 ms | 162 ms |
+  | Profile (extra) | ranked name search `app_search_candidates_by_name()`: definer rights, same visibility function per match, best first, stops at the limit | 1,654 ms | **30 ms** |
+
+- **Partitioning (B73), measured:**
+  - history, recent week: 317 ms pruned against 655 ms unpruned, and 31k against 116k pages;
+  - deliveries, last day: 44 ms against 122 ms;
+  - `application` deliberately not partitioned: all access paths are 1–26 ms index lookups, and six tables have foreign keys to it.
+- **Extrapolation (B74):** two measured points, 1% and 100% of laptop scale.
+  - Point lookups are flat.
+  - Q11 and Q12 grow linearly (×90 for ×100 data).
+  - Full scale projects to ~180 GB, past RAM, so point lookups become 1–5 ms.
+  - **Q11 degrades first:** a full scan plus hash aggregation of 10M groups, beyond `work_mem`, spills to disk, for ~30–60 s. Fix: a dedupe key checked at registration.
+  - Next: Q12 at ~3.5 s (move to an aggregate), then Q2 at ~0.6 s (composite index).
+- `sql/tests/m21_performance.sql`: the indexes serve their queries (plans checked, with sequential scans off so it holds at 1%); partitions prune; the name search equals row-level security (none hidden, none better missed). It passes at 1% and full scale. A fresh build plus M1–M21 passes in the scratch database.
+
+**Errors and fixes (M21)**
+| Problem | Cause | Fix |
+|---|---|---|
+| Name search measured only 15 ms "before" | The test query had no `ORDER BY`, so it stopped at the first 25 matches. Real searches rank best first, which forces reading all matches | The query ranks by similarity (1,654 ms before), matching the UI |
+| The first search function was only 2.7× faster (611 ms) | It checked visibility on all 4,369 matches before ranking | It walks matches best first and stops once enough visible ones are found (30 ms). Correctness re-checked: none hidden, none better missed |
+| The function's result hash differed from the RLS query's | Tie order (the function adds `id` as a tie-breaker) | Compared as sets: identical up to the cut-off |
+| M21 check: "idx_audit_event_organisation_id not used" | On a partitioned table each partition's index has a generated name, so the parent name never appears in plans | Match on the column part of the name |
+| A Python one-liner patch stopped halfway | The verified-milestones line appears twice in the guide, so the single-match check failed | Replace all occurrences, then re-check |
+
+**M22:** not started.

@@ -1,0 +1,145 @@
+[
+ {
+  "query": "Q1 Job search",
+  "file": "sql/queries/fixed/q01_job_search.sql",
+  "runs": 50,
+  "rows": 1,
+  "min": 0.397,
+  "p50": 0.578,
+  "p95": 0.6767,
+  "p99": 0.7228899999999999,
+  "max": 0.742
+ },
+ {
+  "query": "Q2 Candidate search by a recruiter",
+  "file": "sql/queries/fixed/q02_candidate_search.sql",
+  "runs": 50,
+  "rows": 21,
+  "min": 0.794,
+  "p50": 0.9775,
+  "p95": 1.4013499999999999,
+  "p99": 1.634279999999999,
+  "max": 1.844
+ },
+ {
+  "query": "Q3 Application tracker for one candidate",
+  "file": "sql/queries/fixed/q03_candidate_applications.sql",
+  "runs": 50,
+  "rows": 5,
+  "min": 0.836,
+  "p50": 1.029,
+  "p95": 1.6431999999999998,
+  "p99": 2.0992799999999994,
+  "max": 2.309
+ },
+ {
+  "query": "Q4 Recruiter pipeline for one requirement",
+  "file": "sql/queries/fixed/q04_recruiter_pipeline.sql",
+  "runs": 50,
+  "rows": 12,
+  "min": 0.266,
+  "p50": 0.381,
+  "p95": 0.6063999999999999,
+  "p99": 0.6301399999999999,
+  "max": 0.637
+ },
+ {
+  "query": "Q8 Lookup with translation fallback",
+  "file": "sql/queries/fixed/q08_status_lookup.sql",
+  "runs": 50,
+  "rows": 12,
+  "min": 0.314,
+  "p50": 0.418,
+  "p95": 0.6535500000000001,
+  "p99": 0.69446,
+  "max": 0.717
+ },
+ {
+  "query": "Q9 Skill lookup from what people type",
+  "file": "sql/queries/fixed/q09_skill_alias_lookup.sql",
+  "runs": 50,
+  "rows": 3,
+  "min": 0.425,
+  "p50": 0.524,
+  "p95": 0.7780999999999997,
+  "p99": 0.9598699999999997,
+  "max": 1.027
+ },
+ {
+  "query": "Q10 Hiring funnel",
+  "file": "sql/queries/fixed/q10_hiring_funnel.sql",
+  "runs": 50,
+  "rows": 7,
+  "min": 0.069,
+  "p50": 0.261,
+  "p95": 0.3978,
+  "p99": 0.5300399999999996,
+  "max": 0.63
+ },
+ {
+  "query": "Q11 Duplicate candidate detection",
+  "file": "sql/queries/fixed/q11_duplicate_candidates.sql",
+  "runs": 50,
+  "rows": 25,
+  "min": 21.167,
+  "p50": 22.17,
+  "p95": 26.6266,
+  "p99": 27.849069999999998,
+  "max": 27.926
+ },
+ {
+  "query": "Q12 Time to hire by industry",
+  "file": "sql/queries/fixed/q12_time_to_hire_by_industry.sql",
+  "runs": 50,
+  "rows": 30,
+  "min": 1.688,
+  "p50": 1.8645,
+  "p95": 2.72565,
+  "p99": 2.85389,
+  "max": 2.922
+ },
+ {
+  "query": "Q13 Profile download history for one candidate",
+  "file": "sql/queries/fixed/q13_download_history.sql",
+  "runs": 50,
+  "rows": 1,
+  "min": 1.009,
+  "p50": 1.1415,
+  "p95": 1.5311000000000001,
+  "p99": 1.6375199999999999,
+  "max": 1.663
+ },
+ {
+  "query": "I1 Organisation audit trail",
+  "file": "perf/queries/i1_org_audit_trail.sql",
+  "runs": 50,
+  "rows": 6,
+  "min": 0.86,
+  "p50": 1.0065,
+  "p95": 1.47895,
+  "p99": 1.7086199999999994,
+  "max": 1.837
+ },
+ {
+  "query": "I2 Brute-force check at login",
+  "file": "perf/queries/i2_bruteforce_check.sql",
+  "runs": 50,
+  "rows": 1,
+  "min": 0.531,
+  "p50": 0.719,
+  "p95": 1.1369999999999998,
+  "p99": 1.18164,
+  "max": 1.213
+ },
+ {
+  "query": "I3 Provider delivery callback",
+  "file": "perf/queries/i3_delivery_callback.sql",
+  "runs": 50,
+  "rows": 1,
+  "min": 0.484,
+  "p50": 0.662,
+  "p95": 0.9411499999999999,
+  "p99": 1.1795699999999993,
+  "max": 1.33
+ }
+]

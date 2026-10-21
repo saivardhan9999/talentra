@@ -110,6 +110,9 @@ CREATE TABLE audit_event (
 ) PARTITION BY RANGE (occurred_at);
 CREATE INDEX idx_audit_event_target_table_target_record_id ON audit_event (target_table, target_record_id, occurred_at);
 CREATE INDEX idx_audit_event_created_by ON audit_event (created_by, occurred_at);
+-- M21 (B71): an account admin's "last 30 days in my organisation" view; without it every recent partition is scanned
+-- (81 ms p50 at laptop scale over 3.7M events, growing with platform activity).
+CREATE INDEX idx_audit_event_organisation_id ON audit_event (organisation_id, occurred_at) WHERE organisation_id IS NOT NULL;
 CALL create_monthly_partitions('audit_event', DATE '2025-01-01', DATE '2027-01-01');
 CALL make_append_only('audit_event');
 

@@ -20,7 +20,7 @@ A milestone is verified when its script passes **and** a reviewer ticks its chec
    ```sh
    MSYS_NO_PATHCONV=1 ./run_phase1.sh
    ```
-   **Expected:** the last line is `VERIFIED: m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19 m20` and `echo $?` prints `0`. Any `ERROR` / `FAIL` line stops the run with a non-zero exit code.
+   **Expected:** the last line is `VERIFIED: m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19 m20 m21` and `echo $?` prints `0`. Any `ERROR` / `FAIL` line stops the run with a non-zero exit code.
 
 > `MSYS_NO_PATHCONV=1` is only needed in Git Bash on Windows. It stops `/sql/...` being rewritten to a Windows path.
 > `./run_phase1.sh m3` rebuilds the database and verifies one milestone; several can be named (`./run_phase1.sh m19 m20`). `./run_phase1.sh --no-build m3` verifies against the existing database. A plain `./run_phase1.sh` (all milestones) also seeds at laptop scale before M19, so it takes well over an hour; use `SEED_SCALE=0.01` for a quick full pass.
@@ -176,7 +176,7 @@ Every test runs inside a transaction that is rolled back, so the database is unc
 
 | Milestone | Command | Pass signal |
 |---|---|---|
-| All | `./run_phase1.sh` | `VERIFIED: m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19 m20`, exit 0 |
+| All | `./run_phase1.sh` | `VERIFIED: m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11 m12 m13 m14 m15 m16 m17 m18 m19 m20 m21`, exit 0 |
 | M1 Provider | `./run_phase1.sh m1` | 3 PASS |
 | M2 Entities | `./run_phase1.sh m2` | 7 PASS, no orphan tables |
 | M3 Relationships | `./run_phase1.sh m3` | 33 relationships, 895 FKs explicit |
@@ -197,6 +197,7 @@ Every test runs inside a transaction that is rolled back, so the database is unc
 | M18 Constraints (Phase 4) | `./run_phase1.sh m18` | 48 PASS, `MILESTONE 18 CHECKS PASSED` |
 | M19 Seed data (Phase 5) | `SEED_SCALE=1 ./run_phase1.sh m19` (rebuilds and seeds, ~1 h 40 min; `SEED_SCALE=0.01` for a 1-minute check) | 12 PASS, `MILESTONE 19 CHECKS PASSED` — see [phase5-design.md](phase5-design.md) |
 | M20 Queries and validation (Phase 5) | `./run_phase1.sh --no-build m20` on the seeded database; `./run_report.sh` writes the reports | 26 queries return rows, 26 validation rules at 0, `MILESTONE 20 CHECKS PASSED` |
+| M21 Performance (Phase 5) | `./run_phase1.sh --no-build m21` on a seeded database; `python perf/benchmark.py …` for latencies | 7 PASS, `MILESTONE 21 CHECKS PASSED` — see [phase5-performance.md](phase5-performance.md) |
 
 If a check fails: the line before the error names the table, column or rule. Fix the DDL in `sql/0x_*.sql`, then re-run that milestone. A plain `./run_phase1.sh mN` always rebuilds from scratch.
 

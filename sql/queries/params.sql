@@ -30,4 +30,10 @@ SELECT w.id AS wallet, w.organisation_id AS wallet_org,
 FROM wallet w WHERE w.credit_balance > 0 ORDER BY w.id LIMIT 1 \gset
 SELECT candidate_profile_id AS cand_downloaded FROM profile_download_event WHERE wallet_ledger_entry_id IS NOT NULL
 ORDER BY downloaded_at DESC LIMIT 1 \gset
+-- for the M21 index experiments (perf/queries)
+SELECT encode(attempted_identifier_hmac, 'hex') AS hmac_failed FROM login_attempt WHERE login_outcome_id = 2 ORDER BY id LIMIT 1 \gset
+SELECT provider_message_ref AS delivery_ref FROM notification_delivery WHERE provider_message_ref IS NOT NULL ORDER BY id LIMIT 1 \gset
+SELECT m.user_account_id AS recruiter_busy FROM organisation_member m
+WHERE m.organisation_id = :org_busy AND m.role_id = 7 AND m.valid_to IS NULL ORDER BY m.id LIMIT 1 \gset
+SELECT coalesce((SELECT p.full_name FROM candidate_profile p WHERE p.id = :cand), 'Divya Kumar') AS cand_name \gset
 \set QUIET off

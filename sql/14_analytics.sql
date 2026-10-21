@@ -138,6 +138,8 @@ CREATE TABLE fact_application (
 );
 CREATE INDEX idx_fact_application_dim_organisation_id ON fact_application (dim_organisation_id, applied_date_id);
 CREATE INDEX idx_fact_application_dim_job_requirement_id ON fact_application (dim_job_requirement_id);
+-- M21 (B73): hires are 1.5% of applications; reports on hires (time to hire, Q12) read only those rows.
+CREATE INDEX idx_fact_application_joined_date_id ON fact_application (joined_date_id) WHERE joined_date_id IS NOT NULL;
 
 -- Posting and fill, accumulating snapshot: one row per job requirement.
 CREATE TABLE fact_job_posting (

@@ -1,7 +1,7 @@
 # Talentra — Phase 5 Design (Seeding, queries and validation)
 
-**Scope so far:** Milestones 19–20, backlogs B60–B69.
-**Status:** M19–M20 built and verified on PostgreSQL 16 at laptop scale (1M profiles, 5M applications, 16 GB): `SEED_SCALE=1 ./run_phase1.sh m19 m20`. M21 (performance), M22 (security) and M23 (backup, restore, sign-off) are next.
+**Scope so far:** Milestones 19–21, backlogs B60–B74.
+**Status:** M19–M20 built and verified on PostgreSQL 16 at laptop scale (1M profiles, 5M applications, 16 GB): `SEED_SCALE=1 ./run_phase1.sh m19 m20`. M21 (performance) done: see **[phase5-performance.md](phase5-performance.md)**. M22 (security) and M23 (backup, restore, sign-off) are next.
 
 | File | Contents |
 |---|---|
@@ -12,6 +12,8 @@
 | `sql/tests/m19_seed.sql`, `m20_queries.sql` | Milestone checks |
 | `run_report.sh` | Writes `docs/phase5-query-report.md` and `docs/phase5-seed-validation.md` from the seeded database |
 | `docs/coverage-gap-register.md` | Competitive coverage benchmark (Naukri, Monster, LinkedIn) and the gap register |
+| `perf/benchmark.py`, `perf/queries/`, `perf/results/` | M21 latency harness (p50 / p95 / p99), index experiments, raw results |
+| `sql/tests/m21_performance.sql` | M21 check: indexes serve their queries, name search matches row-level security, partitions prune |
 
 ---
 

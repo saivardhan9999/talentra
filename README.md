@@ -4,7 +4,7 @@ PostgreSQL 16 schema for the Talentra job search and demand management platform:
 
 [![verify](../../actions/workflows/verify.yml/badge.svg)](../../actions/workflows/verify.yml)
 
-**Progress:** milestones 1–20 of 23 are done (schema complete, seeded at laptop scale). Performance (M21), security (M22) and backup / sign-off (M23) are next. The build log with every error and fix is in [notes.md](notes.md).
+**Progress:** milestones 1–21 of 23 are done (schema complete, seeded at laptop scale, performance measured: [phase5-performance.md](docs/phase5-performance.md)). Security (M22) and backup / sign-off (M23) are next. The build log with every error and fix is in [notes.md](notes.md).
 
 ## Design documents
 

@@ -1,0 +1,13 @@
+[
+ {
+  "query": "I5 Candidate name search as a recruiter",
+  "file": "perf/queries/i5_name_search_as_recruiter.sql",
+  "runs": 5,
+  "rows": 25,
+  "min": 1632.801,
+  "p50": 1654.024,
+  "p95": 1718.7864,
+  "p99": 1720.58928,
+  "max": 1721.04
+ }
+]

@@ -1,0 +1,13 @@
+[
+ {
+  "query": "I5b Candidate name search as a recruiter through app_search_candidates_by_name",
+  "file": "perf/queries/i5b_name_search_function.sql",
+  "runs": 30,
+  "rows": 25,
+  "min": 4.575,
+  "p50": 4.86,
+  "p95": 5.4598,
+  "p99": 6.320250000000001,
+  "max": 6.632
+ }
+]

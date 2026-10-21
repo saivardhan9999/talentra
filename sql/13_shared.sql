@@ -263,6 +263,29 @@ CREATE POLICY candidate_profile_visible ON candidate_profile FOR SELECT TO talen
            AND (profile_visibility_id = 1 OR (SELECT app_viewer_sees_employers_only()))
            AND user_account_id <> ALL ((SELECT app_candidates_blocking_viewer())::bigint[]));
 
+-- M21: ranked candidate name search. Under row-level security PostgreSQL may not run the
+-- trigram filter (not leakproof) before the policy checks, so a "best matches first" name
+-- search scanned all 1M profiles (1.65 s). This function runs with the owner's rights to use
+-- the trigram index, then applies the same visibility rule (app_can_see_candidate, with the
+-- caller's identity from app.current_user_id) to every match before anything is returned.
+-- Matches are walked best first and the walk stops once enough visible ones are found, so a
+-- common name (thousands of matches) costs about p_limit visibility checks, not one per match.
+CREATE OR REPLACE FUNCTION app_search_candidates_by_name(p_name text, p_limit integer DEFAULT 25)
+RETURNS TABLE (id bigint, full_name varchar, score real)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE r record; v_left integer := least(greatest(p_limit, 1), 100);
+BEGIN
+    FOR r IN SELECT c.id, c.full_name, similarity(c.full_name, p_name) AS score
+             FROM candidate_profile c WHERE c.full_name % p_name
+             ORDER BY 3 DESC, 1 LOOP
+        CONTINUE WHEN NOT app_can_see_candidate(r.id);
+        id := r.id; full_name := r.full_name; score := r.score;
+        RETURN NEXT;
+        v_left := v_left - 1;
+        EXIT WHEN v_left = 0;
+    END LOOP;
+END $$;
+
 DO $$
 DECLARE t text;
 BEGIN

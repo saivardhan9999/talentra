@@ -1,0 +1,46 @@
+[
+ {
+  "query": "I1 Organisation audit trail",
+  "file": "perf/queries/i1_org_audit_trail.sql",
+  "runs": 30,
+  "rows": 8,
+  "min": 73.906,
+  "p50": 80.82499999999999,
+  "p95": 90.8494,
+  "p99": 93.37912000000001,
+  "max": 94.183
+ },
+ {
+  "query": "I2 Brute-force check at login",
+  "file": "perf/queries/i2_bruteforce_check.sql",
+  "runs": 30,
+  "rows": 1,
+  "min": 1.884,
+  "p50": 2.668,
+  "p95": 3.3625000000000003,
+  "p99": 3.3883,
+  "max": 3.397
+ },
+ {
+  "query": "I3 Provider delivery callback",
+  "file": "perf/queries/i3_delivery_callback.sql",
+  "runs": 30,
+  "rows": 1,
+  "min": 23.655,
+  "p50": 25.37,
+  "p95": 28.533900000000003,
+  "p99": 28.954510000000003,
+  "max": 29.123
+ },
+ {
+  "query": "Q12 Time to hire by industry",
+  "file": "sql/queries/fixed/q12_time_to_hire_by_industry.sql",
+  "runs": 30,
+  "rows": 30,
+  "min": 432.56,
+  "p50": 458.8345,
+  "p95": 493.86445,
+  "p99": 506.05182,
+  "max": 510.008
+ }
+]

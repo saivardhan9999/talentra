@@ -1,0 +1,112 @@
+[
+ {
+  "query": "Q1 Job search",
+  "file": "sql/queries/fixed/q01_job_search.sql",
+  "runs": 50,
+  "rows": 20,
+  "min": 3.188,
+  "p50": 3.483,
+  "p95": 4.283399999999999,
+  "p99": 4.7376,
+  "max": 4.865
+ },
+ {
+  "query": "Q2 Candidate search by a recruiter",
+  "file": "sql/queries/fixed/q02_candidate_search.sql",
+  "runs": 50,
+  "rows": 50,
+  "min": 43.356,
+  "p50": 58.619,
+  "p95": 80.8743,
+  "p99": 86.80897999999999,
+  "max": 89.699
+ },
+ {
+  "query": "Q3 Application tracker for one candidate",
+  "file": "sql/queries/fixed/q03_candidate_applications.sql",
+  "runs": 50,
+  "rows": 5,
+  "min": 0.72,
+  "p50": 0.876,
+  "p95": 1.4737999999999996,
+  "p99": 1.6052499999999998,
+  "max": 1.642
+ },
+ {
+  "query": "Q4 Recruiter pipeline for one requirement",
+  "file": "sql/queries/fixed/q04_recruiter_pipeline.sql",
+  "runs": 50,
+  "rows": 11,
+  "min": 0.343,
+  "p50": 0.451,
+  "p95": 0.7559999999999998,
+  "p99": 0.9173199999999995,
+  "max": 1.031
+ },
+ {
+  "query": "Q8 Lookup with translation fallback",
+  "file": "sql/queries/fixed/q08_status_lookup.sql",
+  "runs": 50,
+  "rows": 12,
+  "min": 0.269,
+  "p50": 0.4395,
+  "p95": 0.7653999999999999,
+  "p99": 1.0051199999999993,
+  "max": 1.158
+ },
+ {
+  "query": "Q9 Skill lookup from what people type",
+  "file": "sql/queries/fixed/q09_skill_alias_lookup.sql",
+  "runs": 50,
+  "rows": 3,
+  "min": 0.402,
+  "p50": 0.55,
+  "p95": 0.8204999999999999,
+  "p99": 0.94304,
+  "max": 0.945
+ },
+ {
+  "query": "Q10 Hiring funnel",
+  "file": "sql/queries/fixed/q10_hiring_funnel.sql",
+  "runs": 50,
+  "rows": 7,
+  "min": 0.079,
+  "p50": 0.177,
+  "p95": 0.4300499999999998,
+  "p99": 0.5640899999999999,
+  "max": 0.593
+ },
+ {
+  "query": "Q11 Duplicate candidate detection",
+  "file": "sql/queries/fixed/q11_duplicate_candidates.sql",
+  "runs": 50,
+  "rows": 25,
+  "min": 1859.712,
+  "p50": 1973.4365,
+  "p95": 2149.89895,
+  "p99": 2245.42872,
+  "max": 2325.579
+ },
+ {
+  "query": "Q12 Time to hire by industry",
+  "file": "sql/queries/fixed/q12_time_to_hire_by_industry.sql",
+  "runs": 50,
+  "rows": 30,
+  "min": 433.762,
+  "p50": 453.93600000000004,
+  "p95": 506.2139499999999,
+  "p99": 534.80065,
+  "max": 536.964
+ },
+ {
+  "query": "Q13 Profile download history for one candidate",
+  "file": "sql/queries/fixed/q13_download_history.sql",
+  "runs": 50,
+  "rows": 1,
+  "min": 0.95,
+  "p50": 1.184,
+  "p95": 1.9999999999999998,
+  "p99": 2.1708599999999993,
+  "max": 2.311
+ }
+]

@@ -137,6 +137,9 @@ CREATE TABLE notification_delivery (
     CONSTRAINT ck_notification_delivery_date_range CHECK (sent_at >= queued_at AND delivered_at >= sent_at AND failed_at >= queued_at)
 ) PARTITION BY RANGE (queued_at);
 CREATE INDEX idx_notification_delivery_notification_id ON notification_delivery (notification_id);
+-- M21 (B73): provider callbacks name only their message id. The reference is written once (when the message is
+-- handed to the provider); later status callbacks don't change it, so they stay HOT updates (M18).
+CREATE INDEX idx_notification_delivery_provider_message_ref ON notification_delivery (provider_message_ref) WHERE provider_message_ref IS NOT NULL;
 CALL create_monthly_partitions('notification_delivery', DATE '2025-01-01', DATE '2027-01-01');
 
 -- -----------------------------------------------------------------------------
