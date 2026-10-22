@@ -1,6 +1,6 @@
 # TalTrix Hackathon — Stage 1 deliverables (pass 1)
 
-Produced with the *Talencia Global — Control the Output* process: the schema is defined first (multi-level, every parameter with definition, reason, type, allowed values and source), then the output is generated into it, then scored with the 8-dimension weighted scorecard.
+Produced with the *Talencia Global — Control the Output* process: the schema is defined first (multi-level, every parameter with definition, reason, type, allowed values and source), then the output is generated into it, then scored with the 8-dimension weighted scorecard. Each schema is also drawn as a tree (L1 to L4), with the size of each level, in [schema-trees.md](schema-trees.md).
 
 | Step | a) Output schema | b) Scorecard | c) Output document(s) | Pass 1 score / decision |
 |---|---|---|---|---|

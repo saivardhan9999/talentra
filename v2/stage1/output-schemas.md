@@ -6,7 +6,7 @@ These schemas follow *Control the Output, Process Playbook v2*. Each schema is a
 - **L3:** allowed values or sub-parameters
 - **L4:** atomic definition (type, format, validation)
 
-Every parameter states its definition, reason, data type, whether it is **A**tomic or **C**omposite, its allowed values, whether it is **M**andatory or **O**ptional, and its source. Each schema ends with a decision log of what was kept and dropped, and why. The scorecards are in [scorecards.md](scorecards.md).
+Every parameter states its definition, reason, data type, whether it is **A**tomic or **C**omposite, its allowed values, whether it is **M**andatory or **O**ptional, and its source. Each schema ends with a decision log of what was kept and dropped, and why. The scorecards are in [scorecards.md](scorecards.md). The same schemas are drawn as trees, with the size of each level, in [schema-trees.md](schema-trees.md).
 
 **Common atomic types:**
 - `id`: text with a pattern per step, unique
