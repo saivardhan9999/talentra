@@ -16,6 +16,8 @@ PostgreSQL 16 schema for the Talentra job search and demand management platform:
 | 4 | Notifications and community, Analytics, Shared items | [phase4-design.md](docs/phase4-design.md) | [phase4](docs/phase4-data-dictionary.md) |
 | 5 | Seed data, queries and validation | [phase5-design.md](docs/phase5-design.md) | query report: [phase5-query-report.md](docs/phase5-query-report.md); validation: [phase5-seed-validation.md](docs/phase5-seed-validation.md) |
 
+**Schema diagrams** (v1 and v2, tables and foreign keys): [docs/schema-diagram.md](docs/schema-diagram.md).
+
 Also: [competitive coverage benchmark and gap register](docs/coverage-gap-register.md) · [how to verify each milestone](docs/phase1-verification-guide.md) · [CI and Discord notifications](docs/ci.md).
 
 ## Run
