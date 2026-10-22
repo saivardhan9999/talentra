@@ -86,9 +86,7 @@ Missing values are written `UNKNOWN`, with the reason.
 | 1.2 | statement | actor + capability | testable | text | A | | M | |
 | 1.3 | module | grouping | ownership | enum | A | REF · IAM · ORG · PRO · JOB · APP · BIL · NOT · AUD · ANA · GIG · SRC · COM | M | docket §7 |
 | 1.4 | priority / classification | importance | release scope | enum | A | Must (= must-have) · Should (= should-have) · Could · differentiator flag | M | team |
-| 1.5 | status | build state | honest progress | enum | A | Built · Partial · Deferred | M | |
-| 1.6 | verified_by | proof | every Must is proven | text | A | | M if Must | tests |
-| 1.7 | traces_to | requirement or new insight | the playbook's exit rule | ref → REQ / "new insight" | A | | M | S-01 |
+| 1.5 | traces_to | requirement or new insight | the playbook's exit rule | ref → REQ / "new insight" | A | | M | S-01 |
 | 2 | **Competitor coverage matrix** ([coverage-gap-register.md](../../docs/coverage-gap-register.md)) | what market leaders capture | ≥ 3 competitors | section | C | | M | docket §4 |
 | 2.1 | competitor | product compared | | enum | A | Naukri · Monster / foundit · LinkedIn | M | public sites |
 | 2.2 | coverage | does each one capture the element | gap analysis | enum | A | ✔ · ◐ · ✘ · — | M | |
@@ -98,6 +96,7 @@ Missing values are written `UNKNOWN`, with the reason.
 **Decision log:**
 - **Kept:** MoSCoW, mapped to the playbook's must-have / should-have / differentiator.
 - **Dropped:** effort estimates, which belong to release planning.
+- **Deferred:** status and verified_by are added after the rebuild, when there is something to verify.
 
 ## S-04 — NFR Discovery
 
@@ -108,13 +107,11 @@ Missing values are written `UNKNOWN`, with the reason.
 | 1.2 | category | quality attribute | coverage of all areas | enum | A | PERF · SCAL · REL · SEC · PRIV · INT · AUD · I18N · MNT · OBS · CMP (+ accessibility planned) | M | playbook step 04 |
 | 1.3 | metric | what is measured | numbers, not adjectives | text | A | | M | |
 | 1.4 | target | the number to meet | the playbook's exit rule | number + unit | A | | M | workload model |
-| 1.5 | test_method | how it is measured | every NFR is testable | text | A | benchmark · test suite · drill · review | M | |
-| 1.6 | status | met or not | honest gaps | enum | A | Met · Projected · Production concern · Gap | M | measurements |
 | 2 | **Workload assumptions** | users, rates, volumes | targets derived from volumes | section | C | | M | docket §6 sizing |
 | 3 | **Regulations** | laws that apply | compliance | section | C | DPDP Act 2023 · GST · PCI (avoided) | M | law |
 
 **Decision log:**
-- **Kept:** status, to report honestly.
+- **Deferred:** test_method and status are added after the rebuild.
 - **Dropped:** cost targets, which have no source data yet.
 
 ## S-05 — Business Workflow Analysis

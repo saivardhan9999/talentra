@@ -30,20 +30,20 @@ Columns follow the schema (req_id, statement, source, actor, priority, ambiguity
 | REQ-022 | Model tier-2 domains or justify their omission | §4 tier 2 | system | Should | | FR-PRO-10..12, FR-COM (deferred, justified) |
 | REQ-023 | Tier-3 reference domains are optional | §4 tier 3 | system | Could | | deferred |
 | REQ-024 | Compare data coverage with Naukri, Monster and LinkedIn, and exceed them where it matters | §4 benchmark | team | Must | | competitor matrix (step 03) |
-| REQ-025 | Naming conventions (rule group 1) | §5 | system | Must | | NFR-MNT-02 (t01) |
+| REQ-025 | Naming conventions (rule group 1) | §5 | system | Must | | NFR-MNT-02 |
 | REQ-026 | Surrogate keys, enforced foreign keys, check constraints, limits by the database (rule group 2) | §5 | system | Must | | NFR-INT-02..03 |
 | REQ-027 | Standard domains for names, email, phone, money, dates and enumerations (rule group 3) | §5 | system | Must | | NFR-INT-01, FR-REF-02 |
 | REQ-028 | Audit columns, soft or hard delete per entity, append-only audit, retention (rule group 4) | §5 | system | Must | retention periods chosen by the team | NFR-AUD-01..03, NFR-PRIV-04 |
-| REQ-029 | Every nullable column justified; unknown ≠ not applicable; no sentinels (rule group 5) | §5 | system | Must | | t01, logical model §4 |
+| REQ-029 | Every nullable column justified; unknown ≠ not applicable; no sentinels (rule group 5) | §5 | system | Must | | logical model §4 |
 | REQ-030 | Every column classified Public / Internal / Personal / Sensitive (rule group 6) | §5 | system | Must | | data dictionary, NFR-SEC-03 |
 | REQ-031 | UTF-8, translated UI labels with fallback, user content stored once with language (rule group 7) | §5 | system | Must | | NFR-I18N-01..03 |
-| REQ-032 | Naming patterns for partitions, views and analytical objects (rule group 8) | §5 | system | Must | | t01 |
+| REQ-032 | Naming patterns for partitions, views and analytical objects (rule group 8) | §5 | system | Must | | NFR-MNT-02 |
 | REQ-033 | Licence seat and device limits; device limit at login; revocation audited (rule group 9) | §5 | account admin, user | Must | | FR-ORG-05, FR-IAM-05..06 |
 | REQ-034 | Append-only ledgers; non-overlapping subscription periods; append-only download history (rule group 10) | §5 | system | Must | | FR-BIL-02..05 |
 | REQ-035 | For each external system: ownership, stored vs referenced, failure behaviour, idempotency, audit | §6 | system | Must | | data requirements §6 |
 | REQ-036 | Measure at laptop scale and extrapolate to full scale, naming the query that degrades first | §6 sizing | team | Must | v2 measures at 10k (user decision); v1 at 1M | NFR-PERF-01, physical model §7 |
-| REQ-037 | The data generator is a deliverable and respects the stated distributions and data-quality issues | §6 note | team | Must | | seed.sql, t05 |
-| REQ-038 | Payments and subscriptions, licences and devices, multilingual UI data, security design, analytics layer | §1 scope | system | Must | analytics: funnel built, star schema deferred | FR-BIL, FR-IAM, NFR-I18N, NFR-SEC, FR-ANA |
+| REQ-037 | The data generator is a deliverable and respects the stated distributions and data-quality issues | §6 note | team | Must | | data requirements §6, NFR-INT-05 |
+| REQ-038 | Payments and subscriptions, licences and devices, multilingual UI data, security design, analytics layer | §1 scope | system | Must | analytics: funnel in the v2 core, star schema deferred | FR-BIL, FR-IAM, NFR-I18N, NFR-SEC, FR-ANA |
 | REQ-039 | Out of scope: UI, live integrations, loading 10M profiles on a laptop, ETL | §1 scope | — | Won't | explicit out-of-scope line | scope §3 |
 
 ## Open questions (ranked by design impact)

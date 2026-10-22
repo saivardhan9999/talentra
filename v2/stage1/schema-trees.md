@@ -12,8 +12,8 @@ Each output schema from [output-schemas.md](output-schemas.md) drawn as the play
 |---|---|---|---|---|
 | S-01 — Requirement Analysis Docket | 8 | 14 | 18 | 14 |
 | S-02 — Stakeholders, Personas and Roles | 5 | 10 | 15 | 10 |
-| S-03 — Feature Discovery | 3 | 10 | 30 | 10 |
-| S-04 — NFR Discovery | 3 | 6 | 22 | 6 |
+| S-03 — Feature Discovery | 3 | 8 | 27 | 8 |
+| S-04 — NFR Discovery | 3 | 4 | 14 | 4 |
 | S-05 — Business Workflow Analysis | 4 | 12 | 13 | 12 |
 
 8 sections · 14 parameters · 18 allowed values · 14 typed leaves
@@ -151,7 +151,7 @@ Stakeholders, Personas and Roles
 
 ## S-03 — Feature Discovery
 
-3 sections · 10 parameters · 30 allowed values · 10 typed leaves
+3 sections · 8 parameters · 27 allowed values · 8 typed leaves
 
 ```mermaid
 mindmap
@@ -167,11 +167,6 @@ mindmap
       priority / classification
         Must = must-have · Should = should-have · Could · differentiator flag
         enum
-      status
-        Built · Partial · Deferred
-        enum
-      verified_by
-        text
       traces_to
         ref → REQ / new insight
     Competitor coverage matrix coverage-gap-register.md
@@ -194,8 +189,6 @@ Feature Discovery
 │   ├── statement  [text]
 │   ├── module  [enum]  ── REF · IAM · ORG · PRO · JOB · APP · BIL · NOT · AUD · ANA · GIG · SRC · COM
 │   ├── priority / classification  [enum]  ── Must (= must-have) · Should (= should-have) · Could · differentiator flag
-│   ├── status  [enum]  ── Built · Partial · Deferred
-│   ├── verified_by  [text]
 │   └── traces_to  [ref → REQ / "new insight"]
 ├── Competitor coverage matrix (coverage-gap-register.md)
 │   ├── competitor  [enum]  ── Naukri · Monster / foundit · LinkedIn
@@ -206,7 +199,7 @@ Feature Discovery
 
 ## S-04 — NFR Discovery
 
-3 sections · 6 parameters · 22 allowed values · 6 typed leaves
+3 sections · 4 parameters · 14 allowed values · 4 typed leaves
 
 ```mermaid
 mindmap
@@ -221,12 +214,6 @@ mindmap
         text
       target
         number + unit
-      test_method
-        benchmark · test suite · drill · review
-        text
-      status
-        Met · Projected · Production concern · Gap
-        enum
     Workload assumptions
     Regulations
       DPDP Act 2023 · GST · PCI avoided
@@ -238,9 +225,7 @@ NFR Discovery
 │   ├── nfr_id  [id NFR-[A-Z0-9]+-[0-9]{2}]
 │   ├── category  [enum]  ── PERF · SCAL · REL · SEC · PRIV · INT · AUD · I18N · MNT · OBS · CMP (+ accessibility planned)
 │   ├── metric  [text]
-│   ├── target  [number + unit]
-│   ├── test_method  [text]  ── benchmark · test suite · drill · review
-│   └── status  [enum]  ── Met · Projected · Production concern · Gap
+│   └── target  [number + unit]
 ├── Workload assumptions
 └── Regulations
     └── DPDP Act 2023 · GST · PCI (avoided)

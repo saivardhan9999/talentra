@@ -4,22 +4,22 @@ Output document for Stage 1, step 05. It conforms to the schema S-05 in [output-
 
 ## Workflow inventory and priority
 
-| ID | Workflow | Actors | Central to schema? | Status in v2 |
+| ID | Workflow | Actors | Central to schema? | v2 scope |
 |---|---|---|---|---|
-| WF-01 | Candidate registration and profile building | candidate | yes | built |
-| WF-02 | Employer registration and verification | employer, admin | yes | built |
-| WF-03 | Job requirement posting with questionnaire | employer, recruiter | yes | built |
-| WF-04 | Job search and application | candidate | yes | built |
-| WF-05 | Application pipeline (shortlist → hire) | recruiter, candidate | yes | built |
-| WF-06 | Candidate sourcing and profile download | recruiter | yes | built |
-| WF-07 | Subscription, wallet recharge and credit use | account admin, payment gateway | yes | built |
-| WF-08 | Login with device limit | all users | yes | built |
-| WF-09 | Blocking a company or person | candidate | yes | built |
-| WF-10 | Notifications and job alerts | system, user | yes | built |
+| WF-01 | Candidate registration and profile building | candidate | yes | core |
+| WF-02 | Employer registration and verification | employer, admin | yes | core |
+| WF-03 | Job requirement posting with questionnaire | employer, recruiter | yes | core |
+| WF-04 | Job search and application | candidate | yes | core |
+| WF-05 | Application pipeline (shortlist → hire) | recruiter, candidate | yes | core |
+| WF-06 | Candidate sourcing and profile download | recruiter | yes | core |
+| WF-07 | Subscription, wallet recharge and credit use | account admin, payment gateway | yes | core |
+| WF-08 | Login with device limit | all users | yes | core |
+| WF-09 | Blocking a company or person | candidate | yes | core |
+| WF-10 | Notifications and job alerts | system, user | yes | core |
 | WF-11 | Consultant sourcing request and bulk outreach | consultant, employer | secondary | deferred |
 | WF-12 | Gig request → application → assignment | requester, gig worker | secondary (separate subsystem) | deferred |
 | WF-13 | Support tickets and FAQs | user, admin | secondary | deferred |
-| WF-14 | Data erasure request | candidate, admin | yes (compliance) | built |
+| WF-14 | Data erasure request | candidate, admin | yes (compliance) | core |
 
 **Why some are secondary:** WF-01..10 and WF-14 create or change the records every other feature depends on (people, organisations, jobs, applications, money). WF-11..13 consume those records and can be added without changing them.
 
@@ -226,7 +226,7 @@ Not only the happy path: cancellation, refund, retry, timeout, concurrency and e
 | EX-10 | WF-04 | business rule | attach someone else's resume / answer another job's question | refused | composite foreign keys |
 | EX-11 | WF-05 | business rule | invalid move (e.g. applied → joined) | refused | `application_status_transition` |
 | EX-12 | WF-05 | cancel | candidate withdraws | moves to withdrawn from any active stage; employer notified | pipeline trigger |
-| EX-13 | WF-05 | concurrency | two joins race for the last position | one wins, the other is refused; job becomes filled | `ck_job_requirement_positions` + row lock (t04) |
+| EX-13 | WF-05 | concurrency | two joins race for the last position | one wins, the other is refused; job becomes filled | `ck_job_requirement_positions` + row lock |
 | EX-14 | WF-06 | business rule | download without credits | refused | `wallet_post()` |
 | EX-15 | WF-06 | business rule | candidate blocked the company after the download | contact access withdrawn | `candidate_contact()` |
 | EX-16 | WF-06 | retry | recruiter downloads the same profile again within 30 days | no second charge; same download returned | `billing_download_profile()` |
@@ -236,16 +236,16 @@ Not only the happy path: cancellation, refund, retry, timeout, concurrency and e
 | EX-20 | WF-07 | timeout | no webhook arrives | order stays created; reconciliation job polls the gateway | operations (backlog) |
 | EX-21 | WF-07 | refund | payment refunded | reversal ledger entry; refused if the credits were already spent; subscription cancelled | `wallet_post()` reversal |
 | EX-22 | WF-07 | cancel | subscription cancelled | auto-renew off, period may end early; never deleted | `subscription_guard` |
-| EX-23 | WF-07 | concurrency | parallel debits on a small balance | serialised; balance never negative | wallet row lock (t04) |
-| EX-24 | WF-07 | business rule | adding a member beyond licence seats | refused | seat-limit trigger (t02, t04) |
-| EX-25 | WF-08 | business rule | login past the device limit | refused and audited | `auth_open_session()` (t04) |
+| EX-23 | WF-07 | concurrency | parallel debits on a small balance | serialised; balance never negative | wallet row lock |
+| EX-24 | WF-07 | business rule | adding a member beyond licence seats | refused | seat-limit trigger |
+| EX-25 | WF-08 | business rule | login past the device limit | refused and audited | `auth_open_session()` |
 | EX-26 | WF-08 | timeout | session idle or expired | closed automatically; not counted against the limit | `auth_open_session()` |
 | EX-27 | WF-08 | security | revoked device tries to log in | refused and audited | `user_device.revoked_at` |
 | EX-28 | WF-10 | retry / external down | messaging provider fails | retried with exponential backoff, failed after 5 attempts with a reason | `notification_record_result()` |
 | EX-29 | WF-10 | timeout | worker crashes mid-batch | lease expires after 5 minutes; rows picked up again | `notification_claim()` |
 | EX-30 | WF-14 | business rule | erasure requested while applications exist | personal data removed; applications kept anonymised | `candidate_erase()` |
 
-## Deferred workflows (designed, not built)
+## Deferred workflows (designed, outside the v2 core)
 
 | ID | Outline |
 |---|---|

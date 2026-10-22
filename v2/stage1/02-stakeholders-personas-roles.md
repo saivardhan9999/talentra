@@ -101,12 +101,12 @@ The 9 actors from the docket, mapped to database roles and permissions (source: 
 
 **Hard rules from the docket, and where each is enforced:**
 
-| Rule | Enforcement | Test |
-|---|---|---|
-| A recruiter sees only their own company's jobs | RLS policy `job_requirement_read` / `_update` | t03 |
-| A consultant works only on jobs open to consultants | `application_guard` trigger | t02 |
-| A blocked party cannot see the candidate | RLS on `candidate_profile` and `application`; `candidate_contact()` | t03 (5 checks) |
-| Recruiters cannot register candidates | `auth_register_candidate()` refuses signed-in non-staff | t03 |
-| Every sensitive action is audited | `audit_row_change` triggers, `audit_log()` | t02, t03 |
+| Rule | Enforcement |
+|---|---|
+| A recruiter sees only their own company's jobs | RLS policy `job_requirement_read` / `_update` |
+| A consultant works only on jobs open to consultants | `application_guard` trigger |
+| A blocked party cannot see the candidate | RLS on `candidate_profile` and `application`; `candidate_contact()` |
+| Recruiters cannot register candidates | `auth_register_candidate()` refuses signed-in non-staff |
+| Every sensitive action is audited | `audit_row_change` triggers, `audit_log()` |
 
 Out of scope (docket): sub-roles inside an employer. Extension: a `member_permission` table read by `app_has_permission()`.

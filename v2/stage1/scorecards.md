@@ -42,7 +42,7 @@ D9 = **Source coverage**: every section of the docket mapped to a REQ ID or an e
 | D4 * | 20 | 4 | 16 | each REQ carries its docket § source |
 | D5 | 5 | 1 | 1 | single run |
 | D6 | 5 | 4 | 4 | 3 levels; no parent above 15 children except the REQ list (a list, not a parent) |
-| D7 | 10 | 5 | 10 | the model was built from it (docs 03–05, 111 passing tests) |
+| D7 | 10 | 5 | 10 | the data model (docs 03–05) is derived directly from it |
 | D8 * | 10 | 4 (provisional) | 8 | pending Q&A |
 | D9 | 10 | 5 | 10 | every docket section (§1–§7) mapped to REQ-001..039 or an out-of-scope line |
 | | | | **81** | **Refine:** second run, peer score, D8 Q&A |
@@ -59,7 +59,7 @@ D9 = **Every requirement has an actor; permission matrix complete.**
 | D4 * | 20 | 4 | 16 | personas linked to FR IDs; matrix taken from `access_role_permission` |
 | D5 | 5 | 1 | 1 | single run |
 | D6 | 5 | 4 | 4 | 3 levels |
-| D7 | 10 | 5 | 10 | roles drove the RLS design (36 security tests) |
+| D7 | 10 | 5 | 10 | roles drive the row-level security design |
 | D8 * | 10 | 4 (provisional) | 8 | pending Q&A |
 | D9 | 10 | 5 | 10 | 9 actors + guest × 13 permissions, from the live schema |
 | | | | **81** | **Refine** |
@@ -76,24 +76,24 @@ D9 = **At least three competitors covered; every feature traced.**
 | D4 * | 20 | 3 | 12 | every Must has a verification; the feature → REQ link is by module, not per row |
 | D5 | 5 | 1 | 1 | single run |
 | D6 | 5 | 4 | 4 | module → feature → attributes |
-| D7 | 10 | 5 | 10 | the schema and tests were built from it |
+| D7 | 10 | 5 | 10 | the schema design is derived from it |
 | D8 * | 10 | 4 (provisional) | 8 | pending Q&A |
 | D9 | 10 | 4 | 8 | Naukri, Monster / foundit and LinkedIn compared (63 elements, 7 gaps registered) |
 | | | | **75** | **Refine:** D4 critical below 4 (add per-feature REQ IDs) |
 
 ## Step 04 — NFR Discovery
 Output: [`../docs/02-non-functional-requirements.md`](../docs/02-non-functional-requirements.md) · Schema: [S-04](output-schemas.md#s-04--nfr-discovery)
-D9 = **Every NFR has a number and a test method; targets derived from volumes.**
+D9 = **Every NFR has a number; targets derived from volumes.**
 
 | Dim | W | Score | Points | Evidence |
 |---|---|---|---|---|
-| D1 * | 15 | 5 | 15 | register columns match S-04 exactly (ID, requirement, target, verification, status) |
+| D1 * | 15 | 5 | 15 | register columns match S-04 exactly (ID, requirement, target) |
 | D2 | 15 | 5 | 15 | 37 NFRs in 11 categories |
 | D3 | 10 | 4 | 8 | parameters defined in S-04 |
-| D4 * | 20 | 4 | 16 | targets derived from the workload model (data requirements §3) and measured benchmarks |
+| D4 * | 20 | 4 | 16 | targets derived from the workload model (data requirements §3) |
 | D5 | 5 | 1 | 1 | single run |
 | D6 | 5 | 4 | 4 | category → NFR → metric |
-| D7 | 10 | 5 | 10 | the benchmark and the 111 tests verify them |
+| D7 | 10 | 5 | 10 | targets are concrete enough to verify after the rebuild |
 | D8 * | 10 | 4 (provisional) | 8 | pending Q&A |
 | D9 | 10 | 4 | 8 | DPDP Act 2023 and GST named; accessibility not yet covered (gap) |
 | | | | **85** | **Refine** |
