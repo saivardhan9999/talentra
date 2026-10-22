@@ -27,7 +27,12 @@ jobs:
         shell: bash
         run: |
           docker run -d --name talentra-pg --shm-size=1g -e POSTGRES_PASSWORD=talentra -v "$PWD/sql:/sql" postgres:16
-          for i in $(seq 1 60); do docker exec talentra-pg pg_isready -U postgres -q && break; sleep 1; done
+          # Wait over TCP, not the socket: on first start the image runs a temporary socket-only server for initdb,
+          # then shuts it down and starts the real one. A socket check can catch the temporary server just before
+          # it stops ("the database system is shutting down"); only the real server listens on TCP.
+          ready=0
+          for i in $(seq 1 60); do docker exec talentra-pg pg_isready -h localhost -U postgres -q && ready=1 && break; sleep 1; done
+          if [ "$ready" != 1 ]; then docker logs talentra-pg; echo "PostgreSQL did not become ready in 60 s"; exit 1; fi
           docker exec talentra-pg psql -U postgres -At -c "SELECT version()"
 
       - name: Build schema, seed at 1%, verify M1-M20
