@@ -44,8 +44,8 @@ D9 = **Source coverage**: every section of the docket mapped to a REQ ID or an e
 | D6 | 5 | 4 | 4 | 3 levels; no parent above 15 children except the REQ list (a list, not a parent) |
 | D7 | 10 | 5 | 10 | the model was built from it (docs 03–05, 111 passing tests) |
 | D8 * | 10 | 4 (provisional) | 8 | pending Q&A |
-| D9 | 10 | 4 | 8 | docket §1–§7 mapped; §8 and §10 are missing from the issued docket (noted) |
-| | | | **79** | **Refine:** second run, peer score, D8 Q&A |
+| D9 | 10 | 5 | 10 | every docket section (§1–§7) mapped to REQ-001..039 or an out-of-scope line |
+| | | | **81** | **Refine:** second run, peer score, D8 Q&A |
 
 ## Step 02 — Stakeholders, Personas and Roles
 Output: [`02-stakeholders-personas-roles.md`](02-stakeholders-personas-roles.md) · Schema: [S-02](output-schemas.md#s-02--stakeholders-personas-and-roles)
@@ -119,7 +119,7 @@ D9 = **Every must-have feature appears in a workflow; exceptions cover cancel, r
 
 | Step | a) Schema | b) Scorecard | c) Output | Pass 1 score | Decision |
 |---|---|---|---|---|---|
-| 01 | ✔ | ✔ | ✔ | 79 | Refine |
+| 01 | ✔ | ✔ | ✔ | 81 | Refine |
 | 02 | ✔ | ✔ | ✔ | 81 | Refine |
 | 03 | ✔ | ✔ | ✔ | 75 | Refine |
 | 04 | ✔ | ✔ | ✔ | 85 | Refine |

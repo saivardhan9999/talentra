@@ -5,7 +5,7 @@ Raw numbers: `perf/results/*.json` · harness: `perf/benchmark.py` · experiment
 
 ## Method (B70)
 
-The docket refers to "the method in Section 10", but the docket as issued has no Section 10 (it ends at Section 7, like the missing Section 8 noted in Phase 4). The method below follows what B70 itself lists: hardware, dataset size, query text, number of runs, p50 / p95 / p99.
+The method follows what B70 lists: hardware, dataset size, query text, number of runs, p50 / p95 / p99.
 
 | Item | Value |
 |---|---|

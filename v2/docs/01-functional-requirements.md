@@ -118,7 +118,7 @@ Each requirement has an ID (cited in the migrations and tests), a priority (MoSC
 | ID | Requirement | Pri | Status | Verified by |
 |---|---|---|---|---|
 | FR-ANA-01 | Employer hiring funnel by month: applied → joined, median days to join, only the own organisation | S | Built | `employer_hiring_funnel`, t03, AP-14 |
-| FR-ANA-02 | The KPI star schema of docket section 8 | S | Deferred | v1 Phase 4 design reusable |
+| FR-ANA-02 | A KPI star schema (facts and dimensions for hiring, revenue and engagement KPIs derived from the workflows) | S | Deferred | v1 Phase 4 design reusable |
 
 ## Deferred modules (designed at conceptual level, see [04](04-conceptual-model.md#4-deferred-subject-areas))
 

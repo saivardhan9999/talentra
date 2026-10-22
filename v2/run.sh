@@ -75,6 +75,7 @@ case "${1:-}" in
   bench)      python bench/bench.py --db "$DB" --container "$CONTAINER" ;;
   dictionary) psql_db -At < db/dictionary.sql > docs/data-dictionary.md
               python db/erd.py "$DB" "$CONTAINER" > docs/logical-erd.md
-              echo "wrote docs/data-dictionary.md and docs/logical-erd.md" ;;
+              python db/erd.py --relations "$DB" "$CONTAINER" > docs/relationship-erd.md
+              echo "wrote docs/data-dictionary.md, docs/logical-erd.md and docs/relationship-erd.md" ;;
   *) sed -n '2,9p' "$0"; exit 1 ;;
 esac

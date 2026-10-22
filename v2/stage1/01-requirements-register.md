@@ -45,13 +45,11 @@ Columns follow the schema (req_id, statement, source, actor, priority, ambiguity
 | REQ-037 | The data generator is a deliverable and respects the stated distributions and data-quality issues | §6 note | team | Must | | seed.sql, t05 |
 | REQ-038 | Payments and subscriptions, licences and devices, multilingual UI data, security design, analytics layer | §1 scope | system | Must | analytics: funnel built, star schema deferred | FR-BIL, FR-IAM, NFR-I18N, NFR-SEC, FR-ANA |
 | REQ-039 | Out of scope: UI, live integrations, loading 10M profiles on a laptop, ETL | §1 scope | — | Won't | explicit out-of-scope line | scope §3 |
-| REQ-040 | KPI definitions (§8) and the performance method and RTO (§10) | §8, §10 | — | UNKNOWN | **referenced but missing from the issued docket**; open question raised | open question Q-01 |
 
 ## Open questions (ranked by design impact)
 
 | ID | Question | Design impact |
 |---|---|---|
-| Q-01 | Please issue docket §8 (KPIs) and §10 (performance method, RTO) | high: analytics facts and the recovery design depend on them |
-| Q-02 | Should unverified organisations be allowed to publish jobs? (finding F-05) | medium |
-| Q-03 | Credit prices per action and per plan | low: prices are data, not schema |
-| Q-04 | Seat over-use after a subscription lapses: grace period length? (finding F-04) | low |
+| Q-01 | Should unverified organisations be allowed to publish jobs? (finding F-05) | medium |
+| Q-02 | Credit prices per action and per plan | low: prices are data, not schema |
+| Q-03 | Seat over-use after a subscription lapses: grace period length? (finding F-04) | low |

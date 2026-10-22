@@ -47,7 +47,7 @@ BEGIN
     IF bad IS NOT NULL THEN RAISE EXCEPTION 'FAIL aggregate reads a transactional table: %', bad; END IF;
     RAISE NOTICE 'PASS % aggregates (materialised views) read only facts and dimensions', n;
 
-    -- KPI coverage (docket Section 8 is referenced but absent; KPI set derived from §2 workflows, see phase4-design.md)
+    -- KPI coverage (KPI set derived from the §2 workflows, see phase4-design.md)
     SELECT string_agg(kpi, ', ') INTO bad FROM (VALUES
         ('applications and stage conversion', 'fact_application', 'agg_hiring_funnel_monthly'),
         ('time to shortlist / time to hire', 'fact_application', 'agg_hiring_funnel_monthly'),

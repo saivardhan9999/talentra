@@ -53,7 +53,7 @@ The gig marketplace keeps its own `gig_worker_list_entry` (favourite / blacklist
 
 ### B49 Analytics layer and reporting marts
 
-**KPIs.** B49 and the module table refer to "the KPIs in Section 8", but the docket as issued has no Section 8: it ends at Section 7, the delivery plan. **This gap should be raised with the organisers.** The KPI set below is derived from the core workflows in §2 and the Tier 1 domains in §4, and m15 asserts that every KPI has a fact.
+**KPIs.** The KPI set below is derived from the core workflows in §2 and the Tier 1 domains in §4, and m15 asserts that every KPI has a fact.
 
 | # | KPI | Fact (grain) | Aggregate |
 |---|---|---|---|
@@ -300,7 +300,7 @@ Mutation-tested:
 - Adding an FK from `fact_payment` to `payment_order` makes m16 fail (D19).
 
 **Review checklist**
-- [ ] Missing Section 8 raised with the organisers; derived KPI set accepted.
+- [ ] Derived KPI set accepted.
 - [ ] D19 (marts in the same database, degenerate keys), D20 (one preference row; shared channel list), D21 (reuse of sessions and audit trail), D22 (only deliveries partitioned) agreed.
 - [ ] `block_entry` vs the gig worker blacklist split accepted.
 - [ ] Existing-application scope note for blocks accepted.

@@ -170,7 +170,7 @@ The first m13 run passed: every Phase 3 column had already been classified in M1
   - all 16 docket items map to an entity, and the prefix rule holds;
   - aggregates read only facts and dimensions;
   - every KPI has a fact, and notifications store no message body.
-- **Docket gap found:** B49 says "the KPIs in Section 8", but the 12-page docket has no Section 8 (it ends at Section 7). I derived 13 KPIs from the §2 workflows and recorded the gap in `docs/phase4-design.md` for you to raise with the organisers.
+- **KPIs:** derived 13 KPIs from the §2 workflows (`docs/phase4-design.md`). Update 22-Oct-2026: the faculty said to ignore the docket's references to Sections 8 and 10, so the docs no longer mention them.
 
 **M16 (done)**
 - `m16_relationships.sql` lists 40 Phase 4 relationships with their delete rules, covering every pair the docket names: preference → user, delivery → notification, post → reaction, fact → dimension, aggregate → fact, credential / consent / session → user, audit event → actor, block → blocker and blocked.
@@ -186,7 +186,7 @@ The first m13 run passed: every Phase 3 column had already been classified in M1
 |---|---|---|
 | The first full run stopped in m4: "reserved word used as identifier: status_code" | `fact_gig_assignment.status_code` is on the MySQL reserved-word list that m4 enforces | Renamed it to `assignment_status_code` |
 | Partitioning `notification` would break the FK naming rule | An FK to a partitioned table must include its timestamp partition key, and m4 requires every FK column to end in `_id` | Spotted before building: only `notification_delivery` (the high-volume table) is partitioned, and `notification` stays a plain FK target (D22) |
-| The KPI list the docket refers to doesn't exist | The docket references Section 8, which is missing from the PDF | Derived the KPIs from the workflows; the gap is recorded for the organisers |
+| No KPI list was given | The docket has no KPI section (the faculty said to ignore its references to Sections 8 and 10) | Derived the KPIs from the workflows |
 | A break test on M16 failed at the listed-FK check, not the general rule I meant to test | The dropped FK (`fact_application.applied_date_id`) is also in the hand-written list | Repeated it with an unlisted FK (`fact_outreach.sent_date_id`): the general rule caught it ("dimension key without its FK") |
 
 M16 passed on its first run.
@@ -338,7 +338,7 @@ The M17 and M18 code both passed on the first run.
 ## Milestones 21–22 — Performance and security
 
 **M21 (done).** The full report is in `docs/phase5-performance.md`.
-- **Harness:** `perf/benchmark.py` runs each query 3 times to warm up, then 50 measured runs inside the container, and reports min / p50 / p95 / p99 / max. The method, hardware, settings and dataset are stated in the report. The docket's "Section 10" doesn't exist, the same gap as Section 8.
+- **Harness:** `perf/benchmark.py` runs each query 3 times to warm up, then 50 measured runs inside the container, and reports min / p50 / p95 / p99 / max. The method, hardware, settings and dataset are stated in the report.
 - **Baseline (B70):** the interactive queries are under 8 ms at p99 (Q2 at 83 ms). The outliers are Q11 duplicate detection (p50 1.98 s) and Q12 time to hire (454 ms, 173 ms after the index).
 - **Indexes with before/after (B71–B73):**
 
