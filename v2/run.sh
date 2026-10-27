@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Talentra v2 runner.
 #   ./run.sh reset            drop and rebuild talentra_v2: migrate + seed + test (about a minute at 10k profiles)
+#   ./run.sh prove            drop and rebuild with the small Phase 3 discovery/golden sample dataset + run all tests
 #   ./run.sh migrate          apply pending migrations (each in its own transaction, recorded with a checksum)
-#   ./run.sh seed [profiles]  load synthetic data (default 10000 candidate profiles)
+#   ./run.sh seed [profiles]  load synthetic data (default 10000 candidate profiles; or 'prove' for seed_prove_sample.sql)
 #   ./run.sh test             run db/tests/*.sql (every test rolls back, so the seeded data is unchanged)
 #   ./run.sh bench            latency benchmark of the access patterns -> docs/benchmark-results.md
 #   ./run.sh dictionary       regenerate docs/data-dictionary.md and docs/logical-erd.md from the live catalog
@@ -38,9 +39,15 @@ migrate() {
 
 seed() {
   local n=${1:-10000} t0=$SECONDS
-  psql_db -1 -v profiles="$n" < db/seed/seed.sql      # one transaction: all or nothing
-  psql_db -c "ANALYZE"
-  echo "seeded $n profiles in $((SECONDS - t0)) s"
+  if [ "$n" = "prove" ]; then
+    psql_db -1 < db/seed/seed_prove_sample.sql
+    psql_db -c "ANALYZE"
+    echo "seeded Phase 3 prove sample dataset in $((SECONDS - t0)) s"
+  else
+    psql_db -1 -v profiles="$n" < db/seed/seed.sql      # one transaction: all or nothing
+    psql_db -c "ANALYZE"
+    echo "seeded $n profiles in $((SECONDS - t0)) s"
+  fi
 }
 
 # Each file runs with db/tests/_helpers.sql prepended. Files that must commit (t04: real parallel connections) run on a
@@ -69,6 +76,9 @@ case "${1:-}" in
   reset)
     psql_admin -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" -c "CREATE DATABASE $DB"
     migrate; seed "${2:-10000}"; run_tests ;;
+  prove)
+    psql_admin -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" -c "CREATE DATABASE $DB"
+    migrate; seed prove; run_tests ;;
   migrate)    migrate ;;
   seed)       seed "${2:-10000}" ;;
   test)       run_tests ;;
@@ -77,5 +87,5 @@ case "${1:-}" in
               python db/erd.py "$DB" "$CONTAINER" > docs/logical-erd.md
               python db/erd.py --relations "$DB" "$CONTAINER" > docs/relationship-erd.md
               echo "wrote docs/data-dictionary.md, docs/logical-erd.md and docs/relationship-erd.md" ;;
-  *) sed -n '2,9p' "$0"; exit 1 ;;
+  *) sed -n '2,10p' "$0"; exit 1 ;;
 esac

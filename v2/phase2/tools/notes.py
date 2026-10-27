@@ -61,8 +61,8 @@ ENTITIES = [
      "An applicant's answer to one screening question."),
     ('ENT-28', 'Status change', ['application_status_history'], 'Jobs and applications', 'history', 'Talentra (written by trigger)', 'never deleted (append-only)',
      'One move of an application from one status to another, with time and actor.'),
-    ('ENT-29', 'Allowed transition', ['application_status_transition'], 'Jobs and applications', 'configuration', 'Talentra (product)', 'changed by migration',
-     'A pipeline move the database allows. Anything not listed is refused.'),
+    ('ENT-29', 'Allowed transition', ['application_status_transition', 'job_status_transition'], 'Jobs and applications', 'configuration', 'Talentra (product)', 'changed by migration',
+     'A pipeline or job lifecycle move the database allows. Anything not listed is refused.'),
     ('ENT-30', 'Plan', ['plan'], 'Billing and licences', 'reference', 'Talentra (product)', 'never deleted; deactivated',
      'A product sold: price, period, seats, devices per user, included credits.'),
     ('ENT-31', 'Subscription (licence)', ['subscription'], 'Billing and licences', 'history', 'Talentra (billing)', 'never deleted; cancelled',
@@ -430,6 +430,8 @@ FK_NAMES = {
     ('application_status_history', 'to_status_id'): ('To status', 'Status after the move.'),
     ('application_status_transition', 'from_status_id'): ('From status', 'Status the move starts from.'),
     ('application_status_transition', 'to_status_id'): ('To status', 'Status the move ends in.'),
+    ('job_status_transition', 'from_status_id'): ('From status', 'Job status the move starts from.'),
+    ('job_status_transition', 'to_status_id'): ('To status', 'Job status the move ends in.'),
     ('application_answer', 'job_requirement_id'): ('Job requirement', 'The job applied for, carried so that both composite keys '
                                                    '(to the application and to the question) include it.'),
 }

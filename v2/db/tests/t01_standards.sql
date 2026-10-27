@@ -85,7 +85,7 @@ BEGIN
   -- rule group 4: audit columns and trigger on every business table; reference tables are the documented exception (D-01)
   SELECT string_agg(relname, ', ') INTO bad FROM t_table t WHERE NOT relispartition AND NOT is_business AND NOT is_lookup
     AND relname NOT IN ('language', 'ui_label', 'ui_translation', 'currency', 'country', 'state', 'city', 'skill', 'access_role_permission',
-                        'application_status_transition', 'audit_event', 'system_error');
+                        'application_status_transition', 'job_status_transition', 'audit_event', 'system_error');
   ASSERT bad IS NULL, 'tables without audit columns that are not documented reference or log tables: ' || bad;
   SELECT string_agg(relname, ', ') INTO bad FROM t_table t WHERE is_business AND NOT relispartition AND (
        (SELECT count(*) FROM t_column c WHERE c.relname = t.relname AND c.attname IN ('created_at', 'created_by', 'updated_at', 'updated_by')) <> 4
