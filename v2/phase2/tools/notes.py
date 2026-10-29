@@ -185,7 +185,7 @@ WORKFLOW_STEPS = [
         ('03.2', 'Adds screening questions', 'employer, recruiter', {'screening_question': 'CUD'}),
         ('03.3', 'Publishes: 5 credits debited once', 'employer',
          {'job_requirement': 'U', 'wallet': 'U', 'wallet_ledger_entry': 'C'}),
-        ('03.4', 'Pauses or closes the job', 'employer, recruiter', {'job_requirement': 'U'}),
+        ('03.4', 'Pauses or closes the job', 'employer, recruiter', {'job_requirement': 'U', 'job_status_transition': 'R'}),
     ]),
     ('WF-04', 'Job search and application', [
         ('04.1', 'Searches open jobs by words, city and salary', 'candidate, guest',

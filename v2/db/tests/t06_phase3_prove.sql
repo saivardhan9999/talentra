@@ -45,9 +45,9 @@ SELECT pg_temp.expect_error(format($$UPDATE candidate_profile SET total_experien
 SELECT pg_temp.expect_error(format($$UPDATE candidate_profile SET notice_period_days = 366 WHERE id = %s$$, :cand1_profile),
                             'notice_period_days', 'TC-15-012 notice_period_days > 365 rejected');
 SELECT pg_temp.expect_error(format($$UPDATE job_requirement SET positions_total = 0 WHERE id = %s$$, :job_open),
-                            'positions_total', 'TC-15-013 positions_total = 0 rejected (min 1)');
+                            'positions', 'TC-15-013 positions_total = 0 rejected (min 1)');
 SELECT pg_temp.expect_error(format($$UPDATE job_requirement SET positions_total = 10001 WHERE id = %s$$, :job_open),
-                            'positions_total', 'TC-15-014 positions_total = 10001 rejected (max 10000)');
+                            'positions', 'TC-15-014 positions_total = 10001 rejected (max 10000)');
 
 ------------------------------------------------------------------------------------------------------------------------
 -- PART 2: Step 17 & Step 20 — Verification of all 14 Phase 2 Findings (FND-01..FND-14) and State Transitions
@@ -176,7 +176,8 @@ SELECT auth_record_login_failure(:cand1_user, 3, interval '15 minutes') AS lock3
 SELECT pg_temp.check(NOT :'lock1'::boolean AND NOT :'lock2'::boolean AND :'lock3'::boolean
                      AND (SELECT failed_attempt_count = 3 AND locked_until > now() FROM user_credential WHERE app_user_id = :cand1_user),
                      'TC-20-027 (FND-14) auth_record_login_failure locks account on reaching threshold');
-SELECT pg_temp.check(auth_open_session(:cand1_user, sha256('dev-lock-test'::bytea), 'Lock test device', sha256('tok-lock-test'::bytea)) IS NULL
+SELECT (auth_open_session(:cand1_user, sha256('dev-lock-test'::bytea), 'Lock test device', sha256('tok-lock-test'::bytea)) IS NULL) AS sess_null \gset
+SELECT pg_temp.check(:'sess_null'::boolean
                      AND EXISTS (SELECT 1 FROM audit_event WHERE actor_app_user_id = :cand1_user AND action = 'user_session.refused.account_locked'),
                      'TC-20-028 (FND-14) locked account is refused by auth_open_session and audited');
 

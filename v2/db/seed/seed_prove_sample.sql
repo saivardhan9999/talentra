@@ -114,8 +114,8 @@ INSERT INTO user_credential (app_user_id, password_hash, created_at, created_by)
 SELECT app_user_id, :pw, created_at, app_user_id FROM cand_map;
 
 -- Lock out cand26's credential via auth_record_login_failure to cover lockout state in sample data
-SELECT auth_record_login_failure((SELECT app_user_id FROM cand_map WHERE idx = 26), 2, interval '30 minutes');
-SELECT auth_record_login_failure((SELECT app_user_id FROM cand_map WHERE idx = 26), 2, interval '30 minutes');
+SELECT auth_record_login_failure((SELECT app_user_id FROM cand_map WHERE idx = 26), 2::smallint, interval '30 minutes');
+SELECT auth_record_login_failure((SELECT app_user_id FROM cand_map WHERE idx = 26), 2::smallint, interval '30 minutes');
 
 INSERT INTO user_access_role (app_user_id, access_role_id, created_at, created_by)
 SELECT app_user_id, 8, created_at, app_user_id FROM cand_map;
@@ -360,17 +360,17 @@ SELECT id, CASE WHEN email LIKE 'emp%' THEN 4 ELSE 5 END, created_at, id
 FROM app_user WHERE email LIKE '%@org%.test' AND email NOT LIKE 'admin@%';
 
 INSERT INTO organisation_member (organisation_id, app_user_id, access_role_id, valid_from, valid_to, created_at, created_by)
-SELECT (SELECT org_id FROM org_map WHERE org_idx = 1), id, 4, created_at, NULL, created_at, id FROM app_user WHERE email = 'emp1@org1.test'
+SELECT (SELECT org_id FROM org_map WHERE org_idx = 1), id, 4, created_at, NULL::timestamptz, created_at, id FROM app_user WHERE email = 'emp1@org1.test'
 UNION ALL
-SELECT (SELECT org_id FROM org_map WHERE org_idx = 1), id, 5, created_at, NULL, created_at, id FROM app_user WHERE email = 'rec1@org1.test'
+SELECT (SELECT org_id FROM org_map WHERE org_idx = 1), id, 5, created_at, NULL::timestamptz, created_at, id FROM app_user WHERE email = 'rec1@org1.test'
 UNION ALL
-SELECT (SELECT org_id FROM org_map WHERE org_idx = 1), id, 5, created_at, current_date - interval '5 days', created_at, id FROM app_user WHERE email = 'rec_past@org1.test'
+SELECT (SELECT org_id FROM org_map WHERE org_idx = 1), id, 5, created_at, (current_date - interval '5 days')::timestamptz, created_at, id FROM app_user WHERE email = 'rec_past@org1.test'
 UNION ALL
-SELECT (SELECT org_id FROM org_map WHERE org_idx = 2), id, 5, created_at, NULL, created_at, id FROM app_user WHERE email = 'rec1@org2.test'
+SELECT (SELECT org_id FROM org_map WHERE org_idx = 2), id, 5, created_at, NULL::timestamptz, created_at, id FROM app_user WHERE email = 'rec1@org2.test'
 UNION ALL
-SELECT (SELECT org_id FROM org_map WHERE org_idx = 3), id, 5, created_at, NULL, created_at, id FROM app_user WHERE email = 'rec1@org3.test'
+SELECT (SELECT org_id FROM org_map WHERE org_idx = 3), id, 5, created_at, NULL::timestamptz, created_at, id FROM app_user WHERE email = 'rec1@org3.test'
 UNION ALL
-SELECT (SELECT org_id FROM org_map WHERE org_idx = 6), id, 5, created_at, NULL, created_at, id FROM app_user WHERE email = 'rec1@org6.test';
+SELECT (SELECT org_id FROM org_map WHERE org_idx = 6), id, 5, created_at, NULL::timestamptz, created_at, id FROM app_user WHERE email = 'rec1@org6.test';
 
 ------------------------------------------------------------------------------------------------------------------------
 -- 6. Twelve Job Requirements across all 5 job_status values (draft=1, open=2, paused=3, closed=4, filled=5)
@@ -409,13 +409,13 @@ CREATE TEMP TABLE seed_job (
 );
 
 INSERT INTO seed_job VALUES
-  (1,  1, 'Java Backend Developer',          1, 3, 1, 24, 60, 1200000.00, 1800000.00, 1, 3, 2, false, current_date - interval '20 days', NULL,                              1,  1),
+  (1,  1, 'Java Backend Developer',          1, 3, 1, 24, 60, 1200000.00, 1800000.00, 1, 3, 2, false, current_date - interval '20 days' + interval '2 hours', NULL,                              1,  1),
   (2,  1, 'Senior Spring Boot Architect',    1, 2, 1, 60,120, 2000000.00, 3000000.00, 1, 2, 2, true,  current_date - interval '19 days', (current_date + interval '30 days')::date, 1, 11),
   (3,  1, 'DevOps & Kubernetes Engineer',    1, 2, 1, 36, 84, 1500000.00, 2200000.00, 1, 1, 2, false, current_date - interval '18 days', NULL,                              1, 17),
   (4,  1, 'QA Automation Engineer',          3, 1, 1, 12, 48,  600000.00,  900000.00, 1, 2, 2, false, current_date - interval '17 days', NULL,                              1, 33),
   (5,  1, 'Legacy Migration Specialist',     1, 1, 1, 24, 72, NULL,       NULL,       2, 2, 2, false, current_date - interval '16 days', (current_date - interval '2 days')::date,  1,  6),
   (6,  1, 'Draft: Principal Data Engineer',  1, 3, 1, 48, 96, NULL,       NULL,       2, 1, 1, false, NULL,                              NULL,                              1,  2),
-  (7,  2, 'FinTech Product Analyst',         1, 3, 2, 12, 60,  900000.00, 1400000.00, 1, 2, 2, false, current_date - interval '15 days', NULL,                              4, 28),
+  (7,  2, 'FinTech Product Analyst',         1, 3, 2, 12, 60,  900000.00, 1400000.00, 1, 2, 2, false, current_date - interval '15 days' + interval '10 minutes', NULL,                              4, 28),
   (8,  2, 'Draft: Risk Compliance Officer',  1, 1, 2, 36, 84, NULL,       NULL,       2, 1, 1, false, NULL,                              NULL,                              4, 41),
   (9,  2, 'Archived Treasury Associate',     1, 1, 2, 12, 36,  500000.00,  700000.00, 1, 1, 2, false, current_date - interval '14 days', NULL,                              4, 86),
   (10, 3, 'Fleet Operations Supervisor',     1, 1, 7, 24, 72,  450000.00,  650000.00, 1, 2, 2, true,  current_date - interval '8 days',  NULL,                             12, 83),

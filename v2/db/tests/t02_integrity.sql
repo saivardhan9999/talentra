@@ -118,7 +118,7 @@ SELECT pg_temp.check(:'first_delivery'::boolean AND NOT :'second_delivery'::bool
 SELECT pg_temp.check((SELECT total_amount = subtotal_amount + tax_amount AND tax_amount > 0 FROM invoice WHERE payment_order_id = :ord), 't02 invoice total = subtotal + GST');
 SELECT pg_temp.expect_error(format($$SELECT billing_apply_payment_event(%s, 'refunded', 'evt_test_2', 4000, now(), sha256('y'::bytea))$$, :ord),
                             'does not match', 't02 a webhook amount must match the order');
-SELECT billing_apply_payment_event(:ord, 'refunded', 'evt_test_3', 5000, now(), sha256('z'::bytea)) \g /dev/null
+SELECT billing_apply_payment_event(:ord, 'refunded', 'evt_test_3', 5000, now(), sha256('z'::bytea)) \g
 SELECT pg_temp.check((SELECT balance_credits = :before_capture FROM wallet WHERE id = :wallet)
                      AND EXISTS (SELECT 1 FROM wallet_ledger_entry WHERE idempotency_key = 'refund:' || :ord AND reverses_ledger_entry_id IS NOT NULL),
                      't02 a refund is a reversal entry pointing at the original, never an update');
@@ -140,7 +140,7 @@ SELECT pg_temp.check(ui_text((SELECT id FROM ui_label WHERE label_key = 'applica
 
 -- erasure keeps others' records but removes the person
 SELECT count(*) AS apps_before FROM application WHERE candidate_profile_id = :cand \gset
-SELECT candidate_erase(:cand) \g /dev/null
+SELECT candidate_erase(:cand) \g
 SELECT pg_temp.check((SELECT email IS NULL AND phone_e164 IS NULL AND account_status_id = 4 FROM app_user WHERE id = :cand_user)
                      AND NOT EXISTS (SELECT 1 FROM candidate_skill WHERE candidate_profile_id = :cand)
                      AND NOT EXISTS (SELECT 1 FROM user_credential WHERE app_user_id = :cand_user)

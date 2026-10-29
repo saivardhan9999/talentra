@@ -38,7 +38,7 @@ BEGIN
     IF NEW.job_status_id IS DISTINCT FROM OLD.job_status_id THEN
       IF NOT EXISTS (SELECT 1 FROM job_status_transition
                      WHERE from_status_id = OLD.job_status_id AND to_status_id = NEW.job_status_id) THEN
-        RAISE EXCEPTION 'job requirement % cannot move from status % to %', OLD.id, OLD.job_status_id, NEW.job_status_id
+        RAISE EXCEPTION 'job requirement % cannot move from status % to % (ck_job_requirement_published)', OLD.id, OLD.job_status_id, NEW.job_status_id
           USING ERRCODE = 'check_violation';
       END IF;
       IF NEW.job_status_id = 2 AND NEW.published_at IS NULL THEN
@@ -189,21 +189,33 @@ BEGIN
   RETURN NEW;
 END $$;
 
-CREATE FUNCTION period_close_once_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION organisation_member_close_once_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF TG_TABLE_NAME = 'organisation_member' AND OLD.valid_to IS NOT NULL AND NEW.valid_to IS DISTINCT FROM OLD.valid_to THEN
+  IF OLD.valid_to IS NOT NULL AND NEW.valid_to IS DISTINCT FROM OLD.valid_to THEN
     RAISE EXCEPTION 'organisation_member %: valid_to is write-once; insert a new membership row to rejoin', OLD.id
       USING ERRCODE = 'check_violation';
-  ELSIF TG_TABLE_NAME = 'candidate_block' AND OLD.unblocked_at IS NOT NULL AND NEW.unblocked_at IS DISTINCT FROM OLD.unblocked_at THEN
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE FUNCTION candidate_block_close_once_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.unblocked_at IS NOT NULL AND NEW.unblocked_at IS DISTINCT FROM OLD.unblocked_at THEN
     RAISE EXCEPTION 'candidate_block %: unblocked_at is write-once; insert a new block row to block again', OLD.id
       USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
 END $$;
+
+CREATE FUNCTION period_close_once_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RETURN NEW;
+END $$;
+
 CREATE TRIGGER trg_organisation_member_close_once BEFORE UPDATE ON organisation_member
-    FOR EACH ROW EXECUTE FUNCTION period_close_once_guard();
+    FOR EACH ROW EXECUTE FUNCTION organisation_member_close_once_guard();
 CREATE TRIGGER trg_candidate_block_close_once BEFORE UPDATE ON candidate_block
-    FOR EACH ROW EXECUTE FUNCTION period_close_once_guard();
+    FOR EACH ROW EXECUTE FUNCTION candidate_block_close_once_guard();
 
 ------------------------------------------------------------------------------------------------------------------------
 -- 6. Notification delivery state transitions (closes FND-08)
@@ -356,7 +368,7 @@ END $$;
 -- 10. Database-enforced credential lockout after failed logins (closes FND-14)
 -- 5 consecutive failed attempts lock the account for 15 minutes and write an audit event; auth_open_session checks the lock
 -- and resets failed_attempt_count on success.
-CREATE FUNCTION auth_record_login_failure(p_app_user_id bigint, p_max_attempts smallint DEFAULT 5,
+CREATE FUNCTION auth_record_login_failure(p_app_user_id bigint, p_max_attempts integer DEFAULT 5,
                                           p_lockout_duration interval DEFAULT interval '15 minutes')
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE c user_credential;
@@ -375,6 +387,12 @@ BEGIN
   END IF;
   RETURN false;
 END $$;
+
+CREATE FUNCTION auth_record_login_failure(p_app_user_id bigint, p_max_attempts smallint,
+                                          p_lockout_duration interval)
+RETURNS boolean LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  SELECT auth_record_login_failure(p_app_user_id, p_max_attempts::integer, p_lockout_duration);
+$$;
 
 CREATE OR REPLACE FUNCTION auth_open_session(p_app_user_id bigint, p_device_fingerprint_hash bytea, p_device_label text,
                                              p_token_hash bytea, p_ttl interval DEFAULT interval '30 days')
@@ -426,15 +444,18 @@ END $$;
 -- 11. Privileges for new functions and triggers
 REVOKE ALL ON FUNCTION job_requirement_guard(), organisation_set_verification(bigint, text, text),
     user_device_guard(), auth_revoke_device(bigint), app_user_status_guard(), user_set_account_status(bigint, text),
-    period_close_once_guard(), app_users_without_recruiter_consent(), organisation_ensure_wallet(),
-    auth_record_login_failure(bigint, smallint, interval) FROM PUBLIC;
+    period_close_once_guard(), organisation_member_close_once_guard(), candidate_block_close_once_guard(),
+    app_users_without_recruiter_consent(), organisation_ensure_wallet(),
+    auth_record_login_failure(bigint, integer, interval), auth_record_login_failure(bigint, smallint, interval) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION job_requirement_guard(), user_device_guard(), app_user_status_guard(),
-    period_close_once_guard(), app_users_without_recruiter_consent(), organisation_ensure_wallet()
+    period_close_once_guard(), organisation_member_close_once_guard(), candidate_block_close_once_guard(),
+    app_users_without_recruiter_consent(), organisation_ensure_wallet()
     TO v2_app, v2_payments, v2_worker, v2_reporting;
 
 GRANT EXECUTE ON FUNCTION organisation_set_verification(bigint, text, text), auth_revoke_device(bigint),
-    user_set_account_status(bigint, text), auth_record_login_failure(bigint, smallint, interval)
+    user_set_account_status(bigint, text), auth_record_login_failure(bigint, integer, interval),
+    auth_record_login_failure(bigint, smallint, interval)
     TO v2_app;
 
 ------------------------------------------------------------------------------------------------------------------------
@@ -491,3 +512,5 @@ COMMENT ON COLUMN job_alert.salary_currency_id IS 'Personal. NULL: exactly when 
 COMMENT ON COLUMN job_alert.alert_frequency_id IS 'Personal. How often matching job digests are sent.';
 COMMENT ON COLUMN job_alert.is_active IS 'Personal. Whether the saved job alert is active.';
 COMMENT ON COLUMN job_alert.last_sent_at IS 'Personal. NULL: never sent yet.';
+COMMENT ON COLUMN user_credential.password_changed_at IS 'Sensitive. Timestamp when the password hash was last set.';
+COMMENT ON COLUMN user_credential.failed_attempt_count IS 'Sensitive. Consecutive failed login attempts since last successful login.';

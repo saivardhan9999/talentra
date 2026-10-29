@@ -160,17 +160,17 @@ def verify_specific_criteria():
     print(f"  - Active Candidate Profiles count: {cand_count} (Expected 30)")
     
     # Check 2: 73 tables
-    res = run_psql(DB_NAME, args=["-c", "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'schema_migration';"])
+    res = run_psql(DB_NAME, args=["-c", "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition AND c.relname <> 'schema_migration';"])
     table_count = res.stdout.decode("utf-8").strip().split("\n")[-2].strip()
     print(f"  - Public tables count: {table_count} (Expected 73)")
     
     # Check 3: Lookups count
-    res = run_psql(DB_NAME, args=["-c", "SELECT count(*) FROM lookup_category;"])
+    res = run_psql(DB_NAME, args=["-c", "SELECT count(DISTINCT table_name) FROM information_schema.columns WHERE column_name = 'ui_label_id' AND table_name <> 'ui_translation';"])
     lookups_cat = res.stdout.decode("utf-8").strip().split("\n")[-2].strip()
     print(f"  - Lookup categories: {lookups_cat} (Expected 25)")
     
     # Check 4: Unclassified personal columns (FND-12 check)
-    comment_check_sql = """
+    comment_check_sql = r"""
     SELECT c.table_name, c.column_name
     FROM information_schema.columns c
     JOIN information_schema.tables t ON t.table_name = c.table_name AND t.table_schema = 'public'
@@ -182,7 +182,7 @@ def verify_specific_criteria():
           c.column_name ~* 'phone|email|name|pan|gstin|aadhaar|dob|salary|resume|biography|photo|ip_address|device_id|password|secret|token|bank|account'
           OR d.description ~* 'PII|personal|sensitive'
       )
-      AND (d.description IS NULL OR d.description NOT ~* 'Classification: (personal|sensitive)');
+      AND (d.description IS NULL OR d.description NOT ~* '^(Personal|Sensitive)\.');
     """
     res = run_psql(DB_NAME, sql_input=comment_check_sql)
     out = res.stdout.decode("utf-8")

@@ -7,7 +7,7 @@ CREATE EXTENSION IF NOT EXISTS dblink;
 CREATE FUNCTION pg_temp.race_start(p_sqls text[]) RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
   FOR i IN 1 .. cardinality(p_sqls) LOOP
-    PERFORM dblink_connect('race' || i, 'dbname=' || current_database() || ' user=postgres');
+    PERFORM dblink_connect('race' || i, 'host=127.0.0.1 port=5432 dbname=' || current_database() || ' user=postgres password=' || coalesce(nullif(current_setting('app.db_password', true), ''), '123456'));
     PERFORM dblink_send_query('race' || i, p_sqls[i]);
   END LOOP;
   PERFORM pg_sleep(0.3);                 -- let every attempt reach the lock and queue behind it
@@ -29,10 +29,10 @@ SELECT p.app_user_id AS cand_user FROM candidate_profile p
 WHERE p.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM user_session s WHERE s.app_user_id = p.app_user_id AND s.ended_at IS NULL)
 ORDER BY p.id LIMIT 1 \gset
 BEGIN;
-SELECT 1 FROM app_user WHERE id = :cand_user FOR UPDATE \g /dev/null
+SELECT 1 FROM app_user WHERE id = :cand_user FOR UPDATE \g
 SELECT pg_temp.race_start(ARRAY(
   SELECT format($$SELECT coalesce(auth_open_session(%s, sha256(%L::bytea), 'race device', sha256(%L::bytea))::text, 'refused')$$,
-                :cand_user, 'race-device-' || g, 'race-token-' || g) FROM generate_series(1, 6) g)) \g /dev/null
+                :cand_user, 'race-device-' || g, 'race-token-' || g) FROM generate_series(1, 6) g)) \g
 COMMIT;
 CREATE TEMP TABLE r1 AS SELECT * FROM pg_temp.race_collect(6);
 SELECT pg_temp.check((SELECT count(*) = 3 FROM user_session WHERE app_user_id = :cand_user AND ended_at IS NULL)
@@ -42,11 +42,11 @@ SELECT pg_temp.check((SELECT count(*) = 3 FROM user_session WHERE app_user_id = 
 -- 2. wallet: 8 concurrent debits of 1 credit against a balance of 3
 SELECT id AS wallet, balance_credits AS bal FROM wallet ORDER BY id LIMIT 1 \gset
 SELECT CASE WHEN :bal > 3 THEN wallet_post(:wallet, 'outreach_debit', 3 - :bal, 'race-setup-debit')
-            WHEN :bal < 3 THEN wallet_post(:wallet, 'recharge', 3 - :bal, 'race-setup-credit') END \g /dev/null
+            WHEN :bal < 3 THEN wallet_post(:wallet, 'recharge', 3 - :bal, 'race-setup-credit') END \g
 BEGIN;
-SELECT 1 FROM wallet WHERE id = :wallet FOR UPDATE \g /dev/null
+SELECT 1 FROM wallet WHERE id = :wallet FOR UPDATE \g
 SELECT pg_temp.race_start(ARRAY(
-  SELECT format($$SELECT wallet_post(%s, 'profile_download_debit', -1, %L)$$, :wallet, 'race-debit-' || g) FROM generate_series(1, 8) g)) \g /dev/null
+  SELECT format($$SELECT wallet_post(%s, 'profile_download_debit', -1, %L)$$, :wallet, 'race-debit-' || g) FROM generate_series(1, 8) g)) \g
 COMMIT;
 CREATE TEMP TABLE r2 AS SELECT * FROM pg_temp.race_collect(8);
 SELECT pg_temp.check((SELECT count(*) FILTER (WHERE ok) = 3 AND count(*) FILTER (WHERE error ~ 'insufficient credits') = 5 FROM r2)
@@ -63,10 +63,10 @@ CREATE TEMP TABLE spare AS SELECT app_user_id, row_number() OVER (ORDER BY id) A
 WHERE NOT EXISTS (SELECT 1 FROM organisation_member m WHERE m.app_user_id = candidate_profile.app_user_id) ORDER BY id LIMIT :free + 2;
 INSERT INTO organisation_member (organisation_id, app_user_id, access_role_id) SELECT :org, app_user_id, 5 FROM spare WHERE n <= :free - 1;
 BEGIN;
-SELECT 1 FROM organisation WHERE id = :org FOR UPDATE \g /dev/null
+SELECT 1 FROM organisation WHERE id = :org FOR UPDATE \g
 SELECT pg_temp.race_start(ARRAY(
   SELECT format($$INSERT INTO organisation_member (organisation_id, app_user_id, access_role_id) VALUES (%s, %s, 5) RETURNING id$$, :org, app_user_id)
-  FROM spare WHERE n > :free - 1)) \g /dev/null
+  FROM spare WHERE n > :free - 1)) \g
 COMMIT;
 CREATE TEMP TABLE r3 AS SELECT * FROM pg_temp.race_collect(3);
 SELECT pg_temp.check((SELECT count(*) FILTER (WHERE ok) = 1 AND count(*) FILTER (WHERE error ~ 'used all') = 2 FROM r3),
@@ -77,10 +77,10 @@ SELECT a.job_requirement_id AS job, min(a.id) AS app1, max(a.id) AS app2 FROM ap
 WHERE a.application_status_id = 4 GROUP BY a.job_requirement_id HAVING count(*) >= 2 ORDER BY 1 LIMIT 1 \gset
 UPDATE job_requirement SET positions_total = positions_filled + 1 WHERE id = :job;
 BEGIN;
-SELECT 1 FROM job_requirement WHERE id = :job FOR UPDATE \g /dev/null
+SELECT 1 FROM job_requirement WHERE id = :job FOR UPDATE \g
 SELECT pg_temp.race_start(ARRAY[
   format('UPDATE application SET application_status_id = 5 WHERE id = %s RETURNING id', :app1),
-  format('UPDATE application SET application_status_id = 5 WHERE id = %s RETURNING id', :app2)]) \g /dev/null
+  format('UPDATE application SET application_status_id = 5 WHERE id = %s RETURNING id', :app2)]) \g
 COMMIT;
 CREATE TEMP TABLE r4 AS SELECT * FROM pg_temp.race_collect(2);
 SELECT pg_temp.check((SELECT count(*) FILTER (WHERE ok) = 1 AND count(*) FILTER (WHERE error ~ 'ck_job_requirement_positions') = 1 FROM r4)
